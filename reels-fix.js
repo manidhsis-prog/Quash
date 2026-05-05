@@ -120,6 +120,13 @@
     );
   }
 
+  function renderVerticalReelsSoon() {
+    if (window.location.hash !== "#reels") return;
+    window.setTimeout(renderVerticalReels, 0);
+    window.setTimeout(renderVerticalReels, 80);
+    window.setTimeout(renderVerticalReels, 250);
+  }
+
   window.renderReels = renderVerticalReels;
   try {
     renderReels = renderVerticalReels;
@@ -140,7 +147,11 @@
     if (label) label.textContent = saved ? "Saved" : "Save";
   });
 
-  if (window.location.hash === "#reels") {
-    window.setTimeout(renderVerticalReels, 0);
-  }
+  document.addEventListener("click", (event) => {
+    const routeTarget = event.target.closest("a[href='#reels'], [data-route='reels']");
+    if (routeTarget) renderVerticalReelsSoon();
+  });
+
+  window.addEventListener("hashchange", renderVerticalReelsSoon);
+  renderVerticalReelsSoon();
 })();
