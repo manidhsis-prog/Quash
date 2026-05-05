@@ -21,7 +21,7 @@ RUN apt-get update \
 
 WORKDIR /app
 COPY --from=build /quash_server /app/quash_server
-COPY index.html styles.css app.js README.md /app/
+COPY index.html styles.css app.js reels-fix.css reels-fix.js README.md /app/
 
 RUN mkdir -p /app/data /app/uploads \
     && chown -R quash:quash /app
