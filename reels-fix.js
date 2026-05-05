@@ -155,3 +155,225 @@
   window.addEventListener("hashchange", renderVerticalReelsSoon);
   renderVerticalReelsSoon();
 })();
+
+(() => {
+  const SHORT_REEL_MAX_SECONDS = 90;
+  const VIDEO_FILE_RE = /\.(mp4|webm|ogg|ogv|mov)(\?|$)/i;
+  const originalLoadPosts = loadPosts;
+  const originalCreatePost = createPost;
+
+  function selectedComposerMode() {
+    return document.querySelector(".tool-button.selected")?.dataset.mode || "Text";
+  }
+
+  function isFiniteDuration(value) {
+    return Number.isFinite(value) && value > 0;
+  }
+
+  function secondsLabel(seconds) {
+    const total = Math.max(0, Math.round(seconds));
+    const minutes = Math.floor(total / 60);
+    const rest = total % 60;
+    return minutes ? `${minutes}:${String(rest).padStart(2, "0")}` : `${rest}s`;
+  }
+
+  function readVideoDuration(file, objectUrl) {
+    return new Promise((resolve, reject) => {
+      const video = document.createElement("video");
+      const source = objectUrl || URL.createObjectURL(file);
+      const shouldRevoke = !objectUrl;
+      let settled = false;
+
+      const done = (callback, value) => {
+        if (settled) return;
+        settled = true;
+        video.removeAttribute("src");
+        video.load();
+        if (shouldRevoke) URL.revokeObjectURL(source);
+        callback(value);
+      };
+
+      video.preload = "metadata";
+      video.muted = true;
+      video.playsInline = true;
+      video.addEventListener("loadedmetadata", () => {
+        done(resolve, Number(video.duration || 0));
+      });
+      video.addEventListener("error", () => {
+        done(reject, new Error("Could not read video length. Try another video file."));
+      });
+      window.setTimeout(() => {
+        done(reject, new Error("Could not read video length. Try another video file."));
+      }, 6000);
+      video.src = source;
+    });
+  }
+
+  async function ensureComposerVideoDuration() {
+    if (!uploadedComposerMedia?.file || uploadedComposerMedia.kind !== "video") return null;
+    if (isFiniteDuration(uploadedComposerMedia.durationSeconds)) {
+      return uploadedComposerMedia.durationSeconds;
+    }
+
+    const duration = await readVideoDuration(uploadedComposerMedia.file, uploadedComposerMedia.url);
+    uploadedComposerMedia.durationSeconds = duration;
+    return duration;
+  }
+
+  function finalPostTypeForUpload(selectedMode, durationSeconds) {
+    if (uploadedComposerMedia?.kind === "video" && isFiniteDuration(durationSeconds)) {
+      return durationSeconds <= SHORT_REEL_MAX_SECONDS ? "Reel" : selectedMode;
+    }
+    return selectedMode;
+  }
+
+  async function updateShortVideoHint() {
+    if (!uploadedComposerMedia?.file || uploadedComposerMedia.kind !== "video") return;
+    try {
+      const duration = await ensureComposerVideoDuration();
+      if (!isFiniteDuration(duration)) return;
+
+      if (duration <= SHORT_REEL_MAX_SECONDS) {
+        if (mediaHint) {
+          mediaHint.textContent = `${secondsLabel(duration)} video selected. It will publish as a Reel and also appear in the home feed.`;
+        }
+        setComposerMode("Reel");
+      } else if (selectedComposerMode() === "Reel") {
+        if (mediaHint) {
+          mediaHint.textContent = `This video is ${secondsLabel(duration)}. Reels can be 1:30 max, so choose Video or trim it.`;
+        }
+      } else if (mediaHint) {
+        mediaHint.textContent = `${secondsLabel(duration)} video selected. It will publish as a regular feed video.`;
+      }
+    } catch (error) {
+      if (mediaHint) mediaHint.textContent = error.message;
+    }
+  }
+
+  window.isReelPost = function isReelPostWithShortVideoRule(post) {
+    if (post?.postType === "Reel" || post?.reel || post?.isReel) return true;
+    if (isFiniteDuration(Number(post?.durationSeconds))) {
+      return Number(post.durationSeconds) <= SHORT_REEL_MAX_SECONDS && VIDEO_FILE_RE.test(post.mediaUrl || "");
+    }
+    return false;
+  };
+  try {
+    isReelPost = window.isReelPost;
+  } catch (error) {
+    // Some browser bindings ignore direct reassignment.
+  }
+
+  function algorithmScore(post, surface) {
+    const nowSeconds = Date.now() / 1000;
+    const ageHours = Math.max(0, (nowSeconds - Number(post.createdAt || 0)) / 3600);
+    const likes = Number(post.likeCount || 0);
+    const comments = Number(post.commentCount || (post.comments || []).length || 0);
+    const shares = Number(post.shareCount || 0);
+    const engagement = Math.log1p(likes) * 8 + Math.log1p(comments) * 14 + Math.log1p(shares) * 18;
+    const freshness = 90 / Math.pow(ageHours + 2, 0.82);
+    const reelBoost = window.isReelPost(post) ? (surface === "reels" ? 36 : 10) : 0;
+    const ownPostBoost = String(post.author?.id || "") === String(currentUser()?.id || "") ? 18 : 0;
+    const demoPenalty = post.isDemo && !post.localPersistent ? -8 : 0;
+    return engagement + freshness + reelBoost + ownPostBoost + demoPenalty;
+  }
+
+  function rankPosts(posts, surface = "feed") {
+    return [...posts].sort((a, b) => {
+      const scoreDelta = algorithmScore(b, surface) - algorithmScore(a, surface);
+      if (Math.abs(scoreDelta) > 0.001) return scoreDelta;
+      return Number(b.createdAt || 0) - Number(a.createdAt || 0);
+    });
+  }
+
+  window.quashRankPosts = rankPosts;
+  window.loadPosts = async function loadPostsWithAlgorithm(params = "") {
+    const surface = window.location.hash === "#reels" ? "reels" : "feed";
+    const posts = await originalLoadPosts(params);
+    return rankPosts(posts, surface);
+  };
+  try {
+    loadPosts = window.loadPosts;
+  } catch (error) {
+    // Some browser bindings ignore direct reassignment.
+  }
+
+  async function createPostWithShortVideoRules() {
+    if (!requireUser()) return;
+    const selectedMode = selectedComposerMode();
+    const message = textarea.value.trim();
+    const mediaUrl = mediaUrlInput.value.trim();
+    const hasUpload = Boolean(uploadedComposerMedia?.file);
+    if (!message && !mediaUrl && !hasUpload) {
+      postButton.textContent = "Add update";
+      window.setTimeout(() => (postButton.textContent = "Notify"), 1500);
+      return;
+    }
+
+    postButton.textContent = "Saving...";
+    try {
+      let finalMediaUrl = mediaUrl;
+      let finalPostType = selectedMode;
+      let durationSeconds = null;
+
+      if (hasUpload && uploadedComposerMedia.kind === "video") {
+        postButton.textContent = "Reading video...";
+        durationSeconds = await ensureComposerVideoDuration();
+        if (selectedMode === "Reel" && durationSeconds > SHORT_REEL_MAX_SECONDS) {
+          throw new Error("Reels can be 1:30 max. Trim this video or choose Video.");
+        }
+        finalPostType = finalPostTypeForUpload(selectedMode, durationSeconds);
+      }
+
+      if (hasUpload) {
+        postButton.textContent = uploadedComposerMedia.kind === "image" ? "Optimizing..." : "Checking file...";
+        const uploadFile = await prepareUploadFile(uploadedComposerMedia.file, uploadedComposerMedia.kind);
+        postButton.textContent = "Uploading 0%";
+        const uploaded = await uploadComposerMedia(uploadFile, (progress) => {
+          postButton.textContent = `Uploading ${progress}%`;
+        });
+        finalMediaUrl = uploaded.mediaUrl || "";
+      }
+
+      await requestApi("/api/posts", {
+        method: "POST",
+        body: JSON.stringify({
+          postType: finalPostType,
+          body: message,
+          mediaUrl: finalMediaUrl,
+          durationSeconds: isFiniteDuration(durationSeconds) ? Math.round(durationSeconds) : undefined
+        })
+      });
+
+      if (hasUpload) {
+        localStorage.removeItem(LOCAL_UPLOADED_POSTS_KEY);
+      }
+      textarea.value = "";
+      mediaUrlInput.value = "";
+      clearComposerUpload();
+      postButton.textContent = finalPostType === "Reel" ? "Reel posted" : "Notified";
+      await renderFeed();
+    } catch (error) {
+      postButton.textContent = error.message;
+    }
+    window.setTimeout(() => {
+      postButton.textContent = "Notify";
+    }, 1800);
+  }
+
+  if (postButton) {
+    postButton.removeEventListener("click", originalCreatePost);
+    window.createPost = createPostWithShortVideoRules;
+    try {
+      createPost = createPostWithShortVideoRules;
+    } catch (error) {
+      // Some browser bindings ignore direct reassignment.
+    }
+    postButton.addEventListener("click", createPostWithShortVideoRules);
+  }
+
+  if (mediaPickerInput) {
+    mediaPickerInput.addEventListener("change", () => {
+      window.setTimeout(updateShortVideoHint, 0);
+    });
+  }
+})();
