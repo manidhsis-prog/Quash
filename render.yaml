@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: quash
+    runtime: docker
+    plan: free
+    region: singapore
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /index.html
+    envVars:
+      - key: HOST
+        value: 0.0.0.0

@@ -1,0 +1,374 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Quash | Daily updates, communities, and conversations</title>
+    <meta
+      name="description"
+      content="Quash is a social daily updates platform for news, trends, fashion, communities, groups, videos, reels, images, and posts."
+    >
+    <link rel="preconnect" href="https://images.unsplash.com">
+    <link rel="stylesheet" href="styles.css?v=10">
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="Primary navigation">
+        <a class="brand" href="#" aria-label="Quash home">
+          <span class="brand-mark">Q</span>
+          <span>Quash</span>
+        </a>
+
+        <nav class="nav-list" aria-label="Main">
+          <a class="nav-link active" href="#feed">
+            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 10.5 12 4l8 6.5V20a1 1 0 0 1-1 1h-5v-6h-4v6H5a1 1 0 0 1-1-1z"/></svg>
+            Feed
+          </a>
+          <a class="nav-link" href="#trending">
+            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m4 14 5-5 4 4 7-7"/><path d="M14 6h6v6"/></svg>
+            Trending
+          </a>
+          <a class="nav-link" href="#reels">
+            <svg aria-hidden="true" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m10 9 6 3-6 3z"/></svg>
+            Reels
+          </a>
+          <a class="nav-link" href="#communities">
+            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M16 11a4 4 0 1 0-8 0"/><path d="M3 21a7 7 0 0 1 18 0"/><path d="M19 8v4"/><path d="M21 10h-4"/></svg>
+            Communities
+          </a>
+          <a class="nav-link" href="#groups">
+            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M8 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z"/><path d="M16 13a3 3 0 1 0 0-6"/><path d="M2 21a6 6 0 0 1 12 0"/><path d="M15 21a5 5 0 0 1 7-4.6"/></svg>
+            Groups
+          </a>
+          <a class="nav-link" href="#profile">
+            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 12a5 5 0 1 0 0-10 5 5 0 0 0 0 10z"/><path d="M3 22a9 9 0 0 1 18 0"/></svg>
+            Profile
+          </a>
+        </nav>
+
+      </aside>
+
+      <main class="main-content">
+        <header class="topbar">
+          <label class="search">
+            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m21 21-4.35-4.35"/><circle cx="11" cy="11" r="7"/></svg>
+            <input type="search" placeholder="Search news, creators, groups, fashion">
+          </label>
+          <button class="search-button" type="button">Search</button>
+          <div class="top-actions">
+            <button class="auth-link login-open" type="button">Sign in</button>
+            <button class="auth-link auth-open" type="button">Create account</button>
+            <button class="icon-button" type="button" aria-label="Open notifications">
+              <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"/><path d="M10 21h4"/></svg>
+              <span class="notification-dot"></span>
+            </button>
+          </div>
+        </header>
+
+        <section class="page-view hidden" data-page-view aria-live="polite"></section>
+
+        <section class="hero" aria-labelledby="hero-title">
+          <div class="hero-copy">
+            <p class="eyebrow">World pulse, creator voice, community signal</p>
+            <h1 id="hero-title">Quash</h1>
+            <p>
+              Connect with daily news, trending conversations, fashion moments,
+              short videos, groups, and people sharing what matters now.
+            </p>
+            <div class="hero-actions">
+              <a class="primary-link" href="#feed" data-route="feed">Start sharing</a>
+              <a class="secondary-link" href="#communities" data-route="communities">Join a community</a>
+            </div>
+          </div>
+          <div class="live-ticker" aria-label="Live update ticker">
+            <span>Live</span>
+            <p>Fashion Week street looks are rising across global style circles</p>
+          </div>
+        </section>
+
+        <div class="content-grid">
+          <section class="feed-column" id="feed" aria-label="Daily feed">
+            <section class="composer" id="composer" aria-labelledby="composer-title">
+              <div class="composer-head">
+                <img src="https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=120&q=80" alt="">
+                <div>
+                  <h2 id="composer-title">Share an update</h2>
+                  <p>Text, image, video, reel, or community alert</p>
+                </div>
+              </div>
+              <textarea placeholder="What should the world know today?"></textarea>
+              <input class="media-url-input" type="url" placeholder="Add image or video URL">
+              <div class="composer-media-tools hidden" data-composer-media>
+                <input class="media-picker-input" type="file" accept="image/*,video/*" hidden>
+                <button class="media-picker-button" type="button">Upload from device</button>
+                <button class="media-clear-button hidden" type="button">Remove upload</button>
+                <p class="media-hint">Upload media from your device, or paste a media URL.</p>
+              </div>
+              <div class="composer-media-preview hidden" aria-live="polite"></div>
+              <div class="post-tools" aria-label="Post format options">
+                <button class="tool-button selected" type="button" data-mode="Text">
+                  <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M4 12h12"/><path d="M4 17h8"/></svg>
+                  Text
+                </button>
+                <button class="tool-button" type="button" data-mode="Image">
+                  <svg aria-hidden="true" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8" cy="10" r="2"/><path d="m21 15-5-5L5 19"/></svg>
+                  Image
+                </button>
+                <button class="tool-button" type="button" data-mode="Video">
+                  <svg aria-hidden="true" viewBox="0 0 24 24"><rect x="3" y="5" width="14" height="14" rx="2"/><path d="m17 9 4-2v10l-4-2"/></svg>
+                  Video
+                </button>
+                <button class="tool-button" type="button" data-mode="Reel">
+                  <svg aria-hidden="true" viewBox="0 0 24 24"><rect x="7" y="3" width="10" height="18" rx="2"/><path d="m10 8 5 4-5 4z"/></svg>
+                  Reel
+                </button>
+                <button class="post-button" type="button">Notify</button>
+              </div>
+            </section>
+
+            <article class="post-card">
+              <div class="post-author">
+                <img src="https://images.unsplash.com/photo-1508214751196-bcfd4ca60f91?auto=format&fit=crop&w=120&q=80" alt="">
+                <div>
+                  <h3>Mira Shah</h3>
+                  <p>Global News Desk · 8 min ago</p>
+                </div>
+                <span class="post-tag">News</span>
+              </div>
+              <p class="post-text">
+                City climate teams are testing faster public alert routes for heat waves,
+                floods, and transit delays. Local groups can now push verified updates.
+              </p>
+              <img class="post-media" src="https://images.unsplash.com/photo-1495020689067-958852a7765e?auto=format&fit=crop&w=1200&q=80" alt="Newspapers and daily updates">
+              <div class="engagement-bar">
+                <button type="button">12.4K likes</button>
+                <button type="button">Share</button>
+                <button type="button">Join thread</button>
+              </div>
+            </article>
+
+            <article class="post-card reel-card">
+              <div class="post-author">
+                <img src="https://images.unsplash.com/photo-1524504388940-b1c1722653e1?auto=format&fit=crop&w=120&q=80" alt="">
+                <div>
+                  <h3>Arya Lane</h3>
+                  <p>Style Watch · 18 min ago</p>
+                </div>
+                <span class="post-tag">Reel</span>
+              </div>
+              <div class="reel-preview">
+                <img src="https://images.unsplash.com/photo-1483985988355-763728e1935b?auto=format&fit=crop&w=900&q=80" alt="Fashion creator recording street style reel">
+                <button class="play-button" type="button" aria-label="Play reel">
+                  <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m8 5 11 7-11 7z"/></svg>
+                </button>
+              </div>
+              <p class="post-text">
+                Three streetwear details showing up everywhere today: utility pockets,
+                silver accents, and clean oversized tailoring.
+              </p>
+            </article>
+          </section>
+
+          <aside class="insight-column" aria-label="Trends and communities">
+            <section class="panel" id="trending">
+              <div class="panel-head">
+                <h2>Trending Now</h2>
+                <button type="button">View all</button>
+              </div>
+              <ol class="trend-list">
+                <li><span>#WorldIn60</span><strong>248K posts</strong></li>
+                <li><span>#NewSeasonStyle</span><strong>91K posts</strong></li>
+                <li><span>#LocalAlerts</span><strong>54K posts</strong></li>
+                <li><span>#CreatorNewsroom</span><strong>37K posts</strong></li>
+              </ol>
+            </section>
+
+            <section class="panel" id="reels">
+              <div class="panel-head">
+                <h2>Reels</h2>
+                <button type="button" data-route="reels">Watch all</button>
+              </div>
+              <div class="reel-list">
+                <article>
+                  <img src="https://images.unsplash.com/photo-1483985988355-763728e1935b?auto=format&fit=crop&w=360&q=80" alt="">
+                  <div>
+                    <h3>Street Style in 30s</h3>
+                    <p>Short fashion snapshot from creators near you.</p>
+                  </div>
+                  <button type="button">Play</button>
+                </article>
+                <article>
+                  <img src="https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?auto=format&fit=crop&w=360&q=80" alt="">
+                  <div>
+                    <h3>Daily Trend Recap</h3>
+                    <p>Quick reel roundup on what is taking off now.</p>
+                  </div>
+                  <button type="button">Play</button>
+                </article>
+              </div>
+            </section>
+
+            <section class="panel" id="communities">
+              <div class="panel-head">
+                <h2>Communities</h2>
+                <button type="button" data-action="create-community">Create</button>
+              </div>
+              <div class="community-list">
+                <article>
+                  <img src="https://images.unsplash.com/photo-1521737604893-d14cc237f11d?auto=format&fit=crop&w=240&q=80" alt="">
+                  <div>
+                    <h3>World Connect</h3>
+                    <p>News, culture, and public alerts</p>
+                  </div>
+                  <button type="button" data-action="join-community" data-community-id="world-connect">Join</button>
+                </article>
+                <article>
+                  <img src="https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?auto=format&fit=crop&w=240&q=80" alt="">
+                  <div>
+                    <h3>Fashion Pulse</h3>
+                    <p>Daily looks, reels, and launches</p>
+                  </div>
+                  <button type="button" data-action="join-community" data-community-id="fashion-pulse">Join</button>
+                </article>
+              </div>
+            </section>
+
+            <section class="panel" id="groups">
+              <div class="panel-head">
+                <h2>Groups</h2>
+                <button type="button" data-action="create-group">New</button>
+              </div>
+              <div class="group-card">
+                <div>
+                  <h3>Morning Brief Circle</h3>
+                  <p>People sharing top stories before work</p>
+                </div>
+                <button type="button" data-action="join-group" data-group-id="morning-brief-circle">Join</button>
+              </div>
+              <div class="group-card">
+                <div>
+                  <h3>Creators Hub</h3>
+                  <p>Video, reel, and post collaboration</p>
+                </div>
+                <button type="button" data-action="join-group" data-group-id="creators-hub">Join</button>
+              </div>
+            </section>
+
+            <section class="profile-card" id="profile">
+              <img src="https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=300&q=80" alt="">
+              <h2>High Profile</h2>
+              <p>Build your identity, follow topics, publish alerts, and grow a trusted voice.</p>
+              <div class="profile-stats">
+                <span><strong>16K</strong> Followers</span>
+                <span><strong>82</strong> Posts</span>
+                <span><strong>12</strong> Groups</span>
+              </div>
+            </section>
+          </aside>
+        </div>
+      </main>
+    </div>
+
+    <div class="floating-actions" aria-label="Quick actions">
+      <button class="avatar-button floating-profile" type="button" aria-label="Open profile">
+        <img src="https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=160&q=80" alt="">
+      </button>
+      <button class="create-button floating-create" type="button" aria-label="Create post">
+        <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+        Create
+      </button>
+    </div>
+
+    <aside class="notification-panel" aria-hidden="true" aria-label="Notifications">
+      <div class="notification-head">
+        <h2>Notifications</h2>
+        <button class="notification-close" type="button" aria-label="Close notifications">
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+        </button>
+      </div>
+      <div class="notification-list">
+        <p class="empty-note">Sign in to see likes, comments, shares, and follows.</p>
+      </div>
+    </aside>
+
+    <div class="share-modal" aria-hidden="true">
+      <div class="share-card" role="dialog" aria-modal="true" aria-labelledby="share-title">
+        <button class="share-close" type="button" aria-label="Close share options">
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+        </button>
+        <p class="eyebrow dark">Share post</p>
+        <h2 id="share-title">Send this update anywhere</h2>
+        <p class="share-summary">Copy the post link or choose a platform.</p>
+        <label class="share-link-row">
+          Post link
+          <input class="share-link-input" readonly>
+        </label>
+        <div class="share-actions">
+          <button class="share-copy" type="button">Copy link</button>
+          <button class="share-native" type="button">Share from device</button>
+        </div>
+        <div class="share-platforms" aria-label="Share platforms">
+          <a data-platform="whatsapp" target="_blank" rel="noopener">WhatsApp</a>
+          <a data-platform="x" target="_blank" rel="noopener">X</a>
+          <a data-platform="facebook" target="_blank" rel="noopener">Facebook</a>
+          <a data-platform="linkedin" target="_blank" rel="noopener">LinkedIn</a>
+          <a data-platform="email">Email</a>
+        </div>
+        <p class="share-message" role="status"></p>
+      </div>
+    </div>
+
+    <div class="auth-modal" aria-hidden="true">
+      <div class="auth-card" role="dialog" aria-modal="true" aria-labelledby="auth-title">
+        <button class="auth-close" type="button" aria-label="Close account form">
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+        </button>
+        <div class="auth-tabs" role="tablist" aria-label="Account forms">
+          <button class="auth-tab active" type="button" data-auth-tab="signup">Create</button>
+          <button class="auth-tab" type="button" data-auth-tab="login">Sign in</button>
+        </div>
+        <form class="auth-form signup-form" data-auth-panel="signup">
+          <h2 id="auth-title">Create your Quash profile</h2>
+          <p>Save your account in the Quash database and start building your public voice.</p>
+          <label>
+            Full name
+            <input name="fullName" autocomplete="name" required maxlength="80">
+          </label>
+          <label>
+            Username
+            <input name="username" autocomplete="username" required maxlength="32" pattern="[A-Za-z0-9_]{3,32}">
+          </label>
+          <label>
+            Email
+            <input name="email" type="email" autocomplete="email" required maxlength="160">
+          </label>
+          <label>
+            Password
+            <input name="password" type="password" autocomplete="new-password" required minlength="8">
+          </label>
+          <label>
+            Bio
+            <textarea name="bio" maxlength="220" placeholder="News reporter, fashion creator, community host..."></textarea>
+          </label>
+          <button class="auth-submit" type="submit">Create account</button>
+        </form>
+        <form class="auth-form login-form hidden" data-auth-panel="login">
+          <h2>Welcome back</h2>
+          <p>Sign in to load your saved Quash profile.</p>
+          <label>
+            Email or username
+            <input name="identifier" autocomplete="username" required maxlength="160">
+          </label>
+          <label>
+            Password
+            <input name="password" type="password" autocomplete="current-password" required>
+          </label>
+          <button class="auth-submit" type="submit">Sign in</button>
+        </form>
+        <p class="auth-message" role="status"></p>
+      </div>
+    </div>
+
+    <script src="app.js?v=18"></script>
+  </body>
+</html>
