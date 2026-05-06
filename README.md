@@ -99,12 +99,12 @@ GOOGLE_CLIENT_ID
 GOOGLE_CLIENT_SECRET
 FACEBOOK_APP_ID
 FACEBOOK_APP_SECRET
-PUBLIC_BASE_URL=https://quash.onrender.com
+PUBLIC_BASE_URL=https://quash-ugtq.onrender.com
 ```
 
 Use these OAuth callback URLs in the provider dashboards:
 
 ```text
-https://quash.onrender.com/api/auth/google/callback
-https://quash.onrender.com/api/auth/facebook/callback
+https://quash-ugtq.onrender.com/api/auth/google/callback
+https://quash-ugtq.onrender.com/api/auth/facebook/callback
 ```

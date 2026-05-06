@@ -452,9 +452,6 @@ std::string strip_trailing_slashes(std::string value) {
 }
 
 std::string app_base_url(const httplib::Request &req) {
-  const std::string configured = env_string("PUBLIC_BASE_URL", "");
-  if (!configured.empty()) return strip_trailing_slashes(configured);
-
   std::string proto = trim_copy(req.get_header_value("X-Forwarded-Proto"));
   if (proto.empty()) proto = "http";
   const auto comma = proto.find(',');
@@ -462,8 +459,11 @@ std::string app_base_url(const httplib::Request &req) {
 
   std::string host = trim_copy(req.get_header_value("X-Forwarded-Host"));
   if (host.empty()) host = trim_copy(req.get_header_value("Host"));
-  if (host.empty()) host = "127.0.0.1:8000";
-  return strip_trailing_slashes(proto + "://" + host);
+  if (!host.empty()) return strip_trailing_slashes(proto + "://" + host);
+
+  const std::string configured = env_string("PUBLIC_BASE_URL", "");
+  if (!configured.empty()) return strip_trailing_slashes(configured);
+  return "http://127.0.0.1:8000";
 }
 
 std::string oauth_redirect_uri(const httplib::Request &req, const std::string &provider) {

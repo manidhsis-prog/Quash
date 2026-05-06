@@ -11,4 +11,4 @@ services:
       - key: HOST
         value: 0.0.0.0
       - key: PUBLIC_BASE_URL
-        value: https://quash.onrender.com
+        value: https://quash-ugtq.onrender.com
