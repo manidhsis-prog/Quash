@@ -23,8 +23,8 @@ const authMessage = document.querySelector(".auth-modal .auth-message");
 const gateAuthTabs = document.querySelectorAll("[data-gate-tab]");
 const gateAuthPanels = document.querySelectorAll("[data-gate-panel]");
 const gateAuthMessage = document.querySelector(".gate-auth-message");
-const signupForm = document.querySelector(".signup-form");
-const gateSignupForm = document.querySelector(".gate-signup-form");
+const loginForm = document.querySelector(".login-form");
+const gateLoginForm = document.querySelector(".gate-login-form");
 const authOpenButton = document.querySelector(".auth-open");
 const loginOpenButton = document.querySelector(".login-open");
 const authCloseButton = document.querySelector(".auth-close");
@@ -351,14 +351,14 @@ function requireUser() {
   const user = currentUser();
   const token = currentToken();
   if (!user || !token) {
-    setGateTab("signup");
+    setGateTab("login");
     setAuthLocked(true);
     return null;
   }
   return user;
 }
 
-function openAuth(tabName = "signup") {
+function openAuth(tabName = "login") {
   authModal.classList.add("open");
   authModal.setAttribute("aria-hidden", "false");
   setAuthTab(tabName);
@@ -434,18 +434,18 @@ async function enterAuthenticatedApp(route = "feed") {
   await navigate(route);
 }
 
-async function submitSignupForm(form, messageTarget) {
+async function submitLoginForm(form, messageTarget) {
   const formData = new FormData(form);
-  setAuthMessage(messageTarget, "Creating account...");
+  setAuthMessage(messageTarget, "Signing in...");
   try {
-    const data = await requestApi("/api/register", {
+    const data = await requestApi("/api/login", {
       method: "POST",
       body: JSON.stringify(Object.fromEntries(formData))
     });
     saveSession(data);
-    setAuthMessage(messageTarget, "Account created. You are logged in.", "success");
+    setAuthMessage(messageTarget, "Signed in.", "success");
     form.reset();
-    await enterAuthenticatedApp("profile");
+    await enterAuthenticatedApp("feed");
   } catch (error) {
     setAuthMessage(messageTarget, error.message, "error");
   }
@@ -711,8 +711,9 @@ function saveSession(data) {
 function applyGuest() {
   setAuthLocked(true);
   authOpenButton.classList.remove("profile-avatar-link");
+  authOpenButton.classList.add("top-auth-hidden");
   loginOpenButton.classList.remove("top-auth-hidden");
-  authOpenButton.textContent = "Create account";
+  authOpenButton.textContent = "Profile";
   loginOpenButton.textContent = "Sign in";
   loginOpenButton.dataset.action = "login";
 }
@@ -826,6 +827,7 @@ function applyUser(user) {
   profileCard.querySelector("h2").textContent = user.fullName;
   profileCard.querySelector("p").textContent = user.bio || `@${user.username} is ready to share news, thoughts, reels, and community updates on Quash.`;
   authOpenButton.classList.add("profile-avatar-link");
+  authOpenButton.classList.remove("top-auth-hidden");
   authOpenButton.innerHTML = `<img src="${escapeHtml(avatarUrl)}" alt=""><span>Open profile</span>`;
   loginOpenButton.classList.add("top-auth-hidden");
   loginOpenButton.textContent = "Sign out";
@@ -1824,7 +1826,7 @@ authOpenButton.addEventListener("click", () => {
     navigate("profile");
     return;
   }
-  openAuth("signup");
+  openAuth("login");
 });
 
 loginOpenButton.addEventListener("click", () => {
@@ -1847,14 +1849,14 @@ gateAuthTabs.forEach((tab) => {
   tab.addEventListener("click", () => setGateTab(tab.dataset.gateTab));
 });
 
-signupForm.addEventListener("submit", (event) => {
+loginForm.addEventListener("submit", (event) => {
   event.preventDefault();
-  submitSignupForm(signupForm, authMessage);
+  submitLoginForm(loginForm, authMessage);
 });
 
-gateSignupForm.addEventListener("submit", (event) => {
+gateLoginForm.addEventListener("submit", (event) => {
   event.preventDefault();
-  submitSignupForm(gateSignupForm, gateAuthMessage);
+  submitLoginForm(gateLoginForm, gateAuthMessage);
 });
 
 document.addEventListener("submit", async (event) => {

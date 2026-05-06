@@ -9,7 +9,7 @@
       content="Quash is a social daily updates platform for news, trends, fashion, communities, groups, videos, reels, images, and posts."
     >
     <link rel="preconnect" href="https://images.unsplash.com">
-    <link rel="stylesheet" href="styles.css?v=27">
+    <link rel="stylesheet" href="styles.css?v=29">
     <link rel="stylesheet" href="reels-fix.css?v=24">
   </head>
   <body class="auth-locked">
@@ -19,10 +19,6 @@
         <span>Quash</span>
       </div>
       <div class="auth-gate-card">
-        <div class="auth-tabs" role="tablist" aria-label="Welcome forms">
-          <button class="auth-tab gate-auth-tab active" type="button" data-gate-tab="signup">Create</button>
-          <button class="auth-tab gate-auth-tab" type="button" data-gate-tab="login">Sign in</button>
-        </div>
         <div class="social-login-row" aria-label="Social sign in">
           <button class="social-login google" type="button" data-action="social-login" data-provider="google">
             <span>G</span>
@@ -33,35 +29,19 @@
             Continue with Facebook
           </button>
         </div>
-        <form class="auth-form gate-signup-form" data-gate-panel="signup">
-          <h1 id="auth-gate-title">Join Quash</h1>
-          <p>Create your account to enter Quash.</p>
+        <form class="auth-form gate-login-form" data-gate-panel="login">
+          <h1 id="auth-gate-title">Sign in to Quash</h1>
+          <p>Use email, username, or phone number with your password.</p>
           <label>
-            Full name
-            <input name="fullName" autocomplete="name" required maxlength="80">
-          </label>
-          <label>
-            Username
-            <input name="username" autocomplete="username" required maxlength="32" pattern="[A-Za-z0-9_]{3,32}">
-          </label>
-          <label>
-            Email
-            <input name="email" type="email" autocomplete="email" required maxlength="160">
+            Email, username, or phone
+            <input name="identifier" autocomplete="username" required maxlength="160">
           </label>
           <label>
             Password
-            <input name="password" type="password" autocomplete="new-password" required minlength="8">
+            <input name="password" type="password" autocomplete="current-password" required>
           </label>
-          <label>
-            Bio
-            <textarea name="bio" maxlength="220" placeholder="Tell people who you are..."></textarea>
-          </label>
-          <button class="auth-submit" type="submit">Create account</button>
+          <button class="auth-submit" type="submit">Sign in</button>
         </form>
-        <div class="auth-form gate-social-panel hidden" data-gate-panel="login">
-          <h1>Sign in to Quash</h1>
-          <p>Password login is disabled. Continue with Google or Facebook.</p>
-        </div>
         <p class="auth-message gate-auth-message" role="status"></p>
       </div>
     </section>
@@ -115,7 +95,7 @@
           <button class="search-button" type="button">Search</button>
           <div class="top-actions">
             <button class="auth-link login-open" type="button">Sign in</button>
-            <button class="auth-link auth-open" type="button">Create account</button>
+            <button class="auth-link auth-open top-auth-hidden" type="button">Profile</button>
             <button class="icon-button" type="button" aria-label="Open notifications">
               <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"/><path d="M10 21h4"/></svg>
               <span class="notification-dot"></span>
@@ -340,10 +320,6 @@
         <button class="auth-close" type="button" aria-label="Close account form">
           <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
         </button>
-        <div class="auth-tabs" role="tablist" aria-label="Account forms">
-          <button class="auth-tab active" type="button" data-auth-tab="signup">Create</button>
-          <button class="auth-tab" type="button" data-auth-tab="login">Sign in</button>
-        </div>
         <div class="social-login-row" aria-label="Social sign in">
           <button class="social-login google" type="button" data-action="social-login" data-provider="google">
             <span>G</span>
@@ -354,40 +330,24 @@
             Continue with Facebook
           </button>
         </div>
-        <form class="auth-form signup-form" data-auth-panel="signup">
-          <h2 id="auth-title">Create your Quash profile</h2>
-          <p>Save your account in the Quash database and start building your public voice.</p>
+        <form class="auth-form login-form" data-auth-panel="login">
+          <h2 id="auth-title">Sign in to Quash</h2>
+          <p>Use email, username, or phone number with your password.</p>
           <label>
-            Full name
-            <input name="fullName" autocomplete="name" required maxlength="80">
-          </label>
-          <label>
-            Username
-            <input name="username" autocomplete="username" required maxlength="32" pattern="[A-Za-z0-9_]{3,32}">
-          </label>
-          <label>
-            Email
-            <input name="email" type="email" autocomplete="email" required maxlength="160">
+            Email, username, or phone
+            <input name="identifier" autocomplete="username" required maxlength="160">
           </label>
           <label>
             Password
-            <input name="password" type="password" autocomplete="new-password" required minlength="8">
+            <input name="password" type="password" autocomplete="current-password" required>
           </label>
-          <label>
-            Bio
-            <textarea name="bio" maxlength="220" placeholder="News reporter, fashion creator, community host..."></textarea>
-          </label>
-          <button class="auth-submit" type="submit">Create account</button>
+          <button class="auth-submit" type="submit">Sign in</button>
         </form>
-        <div class="auth-form login-social-panel hidden" data-auth-panel="login">
-          <h2>Sign in to Quash</h2>
-          <p>Password login is disabled. Continue with Google or Facebook.</p>
-        </div>
         <p class="auth-message" role="status"></p>
       </div>
     </div>
 
-    <script src="app.js?v=27"></script>
+    <script src="app.js?v=29"></script>
     <script src="reels-fix.js?v=24"></script>
   </body>
 </html>

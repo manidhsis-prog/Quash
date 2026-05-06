@@ -116,6 +116,16 @@ std::string lower_copy(const std::string &value) {
   return out;
 }
 
+std::string normalize_phone_number(const std::string &value) {
+  std::string out;
+  for (unsigned char c : value) {
+    if (std::isdigit(c)) {
+      out.push_back(static_cast<char>(c));
+    }
+  }
+  return out;
+}
+
 bool starts_with(const std::string &value, const std::string &prefix) {
   return value.size() >= prefix.size() &&
          std::equal(prefix.begin(), prefix.end(), value.begin());
@@ -437,9 +447,9 @@ public:
   }
 
   std::optional<json> register_user(const std::string &full_name, const std::string &username,
-                                    const std::string &email, const std::string &password,
-                                    const std::string &bio, std::string &error,
-                                    int &status) {
+                                    const std::string &email, const std::string &phone,
+                                    const std::string &password, const std::string &bio,
+                                    std::string &error, int &status) {
     auto hash = password_hash(password);
     if (!hash) {
       error = "Password hashing is unavailable on this runtime.";
@@ -453,8 +463,9 @@ public:
     const auto email_lower = lower_copy(email);
     for (const auto &user : db_["users"]) {
       if (user.value("username", "") == username ||
-          lower_copy(user.value("email", "")) == email_lower) {
-        error = "That username or email is already registered.";
+          lower_copy(user.value("email", "")) == email_lower ||
+          (!phone.empty() && user.value("phone", "") == phone)) {
+        error = "That username, email, or phone number is already registered.";
         status = 409;
         return std::nullopt;
       }
@@ -467,6 +478,7 @@ public:
         {"fullName", full_name},
         {"username", username},
         {"email", email_lower},
+        {"phone", phone},
         {"passwordHash", *hash},
         {"bio", bio},
         {"avatarUrl", ""},
@@ -494,17 +506,19 @@ public:
     cleanup_expired_sessions_unlocked(unix_now());
 
     const auto needle = lower_copy(identifier);
+    const auto phone_needle = normalize_phone_number(identifier);
     json *user_ptr = nullptr;
     for (auto &user : db_["users"]) {
       if (lower_copy(user.value("email", "")) == needle ||
-          lower_copy(user.value("username", "")) == needle) {
+          lower_copy(user.value("username", "")) == needle ||
+          (!phone_needle.empty() && user.value("phone", "") == phone_needle)) {
         user_ptr = &user;
         break;
       }
     }
 
     if (!user_ptr || !password_matches(password, user_ptr->value("passwordHash", ""))) {
-      error = "Email, username, or password is incorrect.";
+      error = "Email, username, phone, or password is incorrect.";
       status = 401;
       return std::nullopt;
     }
@@ -1306,6 +1320,9 @@ private:
     if (!db_.contains("notifications") || !db_["notifications"].is_array()) {
       db_["notifications"] = json::array();
     }
+    for (auto &user : db_["users"]) {
+      if (!user.contains("phone")) user["phone"] = "";
+    }
   }
 
   void save_unlocked() {
@@ -1389,6 +1406,7 @@ private:
     };
     if (include_email) {
       out["email"] = user.value("email", "");
+      out["phone"] = user.value("phone", "");
     }
     return out;
   }
@@ -1657,9 +1675,15 @@ int main() {
   });
 
   server.Post("/api/register", [&](const httplib::Request &req, httplib::Response &res) {
-    if (!store.allow_rate("register", client_fingerprint(req))) {
-      send_json(req, res,
-                {{"error", "Too many registration attempts. Please wait and try again."}},
+    send_json(req, res,
+              {{"error",
+                "Direct account creation is disabled. Sign in with an approved Quash account."}},
+              403);
+  });
+
+  server.Post("/api/login", [&](const httplib::Request &req, httplib::Response &res) {
+    if (!store.allow_rate("login", client_fingerprint(req))) {
+      send_json(req, res, {{"error", "Too many login attempts. Please wait and try again."}},
                 429);
       return;
     }
@@ -1672,54 +1696,21 @@ int main() {
       return;
     }
 
-    const std::string full_name = trim_copy(body->value("fullName", ""));
-    const std::string username = trim_copy(body->value("username", ""));
-    const std::string email = lower_copy(trim_copy(body->value("email", "")));
+    const std::string identifier = trim_copy(body->value("identifier", ""));
     const std::string password = body->value("password", "");
-    const std::string bio = trim_copy(body->value("bio", ""));
-
-    if (full_name.empty() || username.empty() || email.empty() || password.empty()) {
-      send_json(req, res,
-                {{"error", "Full name, username, email, and password are required."}}, 400);
-      return;
-    }
-    if (full_name.size() > 80) {
-      send_json(req, res, {{"error", "Full name is too long."}}, 400);
-      return;
-    }
-    if (bio.size() > 220) {
-      send_json(req, res, {{"error", "Bio is too long."}}, 400);
-      return;
-    }
-    if (password.size() < 8) {
-      send_json(req, res, {{"error", "Password must be at least 8 characters."}}, 400);
-      return;
-    }
-    if (!std::regex_match(username, kUsernameRe)) {
-      send_json(req, res,
-                {{"error", "Username can use letters, numbers, and underscores."}}, 400);
-      return;
-    }
-    if (!std::regex_match(email, kEmailRe)) {
-      send_json(req, res, {{"error", "Email format is invalid."}}, 400);
+    if (identifier.empty() || password.empty()) {
+      send_json(req, res, {{"error", "Email, username, phone, and password are required."}}, 400);
       return;
     }
 
     std::string error;
-    int status = 201;
-    auto result = store.register_user(full_name, username, email, password, bio, error, status);
+    int status = 200;
+    auto result = store.login_user(identifier, password, error, status);
     if (!result) {
       send_json(req, res, {{"error", error}}, status);
       return;
     }
-    send_json(req, res, *result, 201);
-  });
-
-  server.Post("/api/login", [&](const httplib::Request &req, httplib::Response &res) {
-    send_json(req, res,
-              {{"error",
-                "Password login is disabled. Continue with Google or Facebook, or create a new Quash account."}},
-              403);
+    send_json(req, res, *result);
   });
 
   server.Get("/api/auth/google", [&](const httplib::Request &req, httplib::Response &res) {
