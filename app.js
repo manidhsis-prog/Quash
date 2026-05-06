@@ -861,6 +861,7 @@ function setActiveRoute(route) {
   navLinks.forEach((link) => {
     link.classList.toggle("active", link.getAttribute("href") === `#${routeForNav}`);
   });
+  createButton?.classList.toggle("hidden", route === "messages");
 }
 
 function showHome() {
