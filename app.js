@@ -51,12 +51,18 @@ const SESSION_USER_KEY = "quashUser";
 const SESSION_TOKEN_KEY = "quashToken";
 const LOCAL_UPLOADED_POSTS_KEY = "quashLocalUploadedPosts";
 const MAX_LOCAL_UPLOADED_POSTS = 24;
+const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
+const IMAGE_COMPRESS_THRESHOLD_BYTES = 1200 * 1024;
+const MAX_UPLOAD_IMAGE_EDGE = 1600;
+const IMAGE_UPLOAD_QUALITY = 0.82;
 const CUSTOM_COMMUNITIES_KEY = "quashCustomCommunities";
 const CUSTOM_GROUPS_KEY = "quashCustomGroups";
 const JOINED_COMMUNITIES_KEY = "quashJoinedCommunities";
 const JOINED_GROUPS_KEY = "quashJoinedGroups";
+const SAVED_REELS_KEY = "quashSavedReels";
 let shareContext = null;
 let uploadedComposerMedia = null;
+let activeChatUserId = "";
 
 const tickerUpdates = [
   "Fashion Week street looks are rising across global style circles",
@@ -137,6 +143,13 @@ function compactNumber(value) {
   return String(number);
 }
 
+function formatBytes(bytes) {
+  const size = Number(bytes || 0);
+  if (size >= 1024 * 1024) return `${(size / (1024 * 1024)).toFixed(size >= 10 * 1024 * 1024 ? 0 : 1)} MB`;
+  if (size >= 1024) return `${Math.round(size / 1024)} KB`;
+  return `${size} B`;
+}
+
 function timeAgo(timestamp) {
   const seconds = Math.max(1, Math.floor(Date.now() / 1000 - Number(timestamp)));
   if (seconds < 60) return "just now";
@@ -198,6 +211,27 @@ function toggleJoined(key, id) {
   }
   writeJsonArray(scopedKey, [...set]);
   return set.has(itemId);
+}
+
+function savedReelSet() {
+  return new Set(readJsonArray(userScopedKey(SAVED_REELS_KEY)).map(String));
+}
+
+function isReelSaved(postId) {
+  return savedReelSet().has(String(postId));
+}
+
+function toggleSavedReel(postId) {
+  const scopedKey = userScopedKey(SAVED_REELS_KEY);
+  const set = savedReelSet();
+  const id = String(postId);
+  if (set.has(id)) {
+    set.delete(id);
+  } else {
+    set.add(id);
+  }
+  writeJsonArray(scopedKey, [...set]);
+  return set.has(id);
 }
 
 function createdCommunities() {
@@ -412,6 +446,13 @@ function setComposerUpload(file, kind) {
   } else {
     composerMediaPreview.innerHTML = `<img src="${escapeHtml(objectUrl)}" alt="Upload preview">`;
   }
+  if (mediaHint) {
+    const sizeText = formatBytes(file.size);
+    mediaHint.textContent =
+      kind === "image"
+        ? `${sizeText} selected. Large images are optimized before upload.`
+        : `${sizeText} selected. Videos upload fastest under 25 MB on free hosting.`;
+  }
   composerMediaPreview.classList.remove("hidden");
 }
 
@@ -437,13 +478,55 @@ function syncComposerUploadUi(mode) {
   }
 }
 
-function readFileAsDataUrl(file) {
+function canvasToBlob(canvas, type, quality) {
   return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result || ""));
-    reader.onerror = () => reject(new Error("Could not read media file."));
-    reader.readAsDataURL(file);
+    canvas.toBlob((blob) => {
+      if (blob) {
+        resolve(blob);
+      } else {
+        reject(new Error("Could not optimize image."));
+      }
+    }, type, quality);
   });
+}
+
+async function compressImageForUpload(file) {
+  if (!file.type.startsWith("image/") || file.type === "image/gif" || file.size < IMAGE_COMPRESS_THRESHOLD_BYTES) {
+    return file;
+  }
+
+  const bitmap = await createImageBitmap(file);
+  const scale = Math.min(1, MAX_UPLOAD_IMAGE_EDGE / Math.max(bitmap.width, bitmap.height));
+  if (scale >= 1 && file.size < 2 * IMAGE_COMPRESS_THRESHOLD_BYTES) {
+    bitmap.close?.();
+    return file;
+  }
+
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+  canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+  const context = canvas.getContext("2d");
+  context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  bitmap.close?.();
+
+  const blob = await canvasToBlob(canvas, "image/jpeg", IMAGE_UPLOAD_QUALITY);
+  if (blob.size >= file.size) return file;
+  const name = file.name.replace(/\.[^.]+$/, "") || "quash-image";
+  return new File([blob], `${name}.jpg`, { type: "image/jpeg", lastModified: Date.now() });
+}
+
+async function prepareUploadFile(file, kind) {
+  if (file.size > MAX_UPLOAD_BYTES) {
+    throw new Error(`File too large. Choose a file under ${formatBytes(MAX_UPLOAD_BYTES)}.`);
+  }
+  if (kind === "image") {
+    const optimized = await compressImageForUpload(file);
+    if (mediaHint && optimized.size < file.size) {
+      mediaHint.textContent = `Optimized from ${formatBytes(file.size)} to ${formatBytes(optimized.size)} before upload.`;
+    }
+    return optimized;
+  }
+  return file;
 }
 
 function createLocalUploadedPost(postType, body, mediaUrl) {
@@ -478,12 +561,44 @@ function createLocalUploadedPost(postType, body, mediaUrl) {
   return writeLocalUploadedPosts(merged);
 }
 
-async function uploadComposerMedia(file) {
+async function uploadComposerMedia(file, onProgress = () => {}) {
   const formData = new FormData();
   formData.append("media", file, file.name || "upload");
-  return requestApi("/api/media-upload", {
-    method: "POST",
-    body: formData
+
+  return new Promise((resolve, reject) => {
+    const request = new XMLHttpRequest();
+    request.open("POST", `${API_BASE}/api/media-upload`);
+    request.withCredentials = true;
+
+    const token = currentToken();
+    const csrfToken = readCookie("XSRF-TOKEN");
+    if (token) request.setRequestHeader("Authorization", `Bearer ${token}`);
+    if (csrfToken) request.setRequestHeader("X-XSRF-TOKEN", csrfToken);
+
+    request.upload.addEventListener("progress", (event) => {
+      if (!event.lengthComputable) return;
+      onProgress(Math.min(99, Math.round((event.loaded / event.total) * 100)));
+    });
+
+    request.addEventListener("load", () => {
+      const data = JSON.parse(request.responseText || "{}");
+      if (request.status >= 200 && request.status < 300) {
+        onProgress(100);
+        resolve(data);
+        return;
+      }
+      if (request.status === 401) {
+        clearSession();
+        applyGuest();
+      }
+      reject(new Error(data.error || "Upload failed."));
+    });
+
+    request.addEventListener("error", () => {
+      reject(new Error("Upload failed. Try a smaller file or a stronger connection."));
+    });
+
+    request.send(formData);
   });
 }
 
@@ -617,6 +732,66 @@ function demoProfileFor(userId) {
   };
 }
 
+function chatHashFor(userId) {
+  return userId ? `#messages-${encodeURIComponent(userId)}` : "#messages";
+}
+
+function mergeChatContacts(conversations = [], contacts = []) {
+  const rows = new Map();
+  conversations.forEach((conversation) => {
+    if (!conversation?.user?.id) return;
+    rows.set(String(conversation.user.id), {
+      user: conversation.user,
+      lastMessage: conversation.lastMessage || null,
+      unreadCount: Number(conversation.unreadCount || 0)
+    });
+  });
+  contacts.forEach((user) => {
+    if (!user?.id) return;
+    const key = String(user.id);
+    if (!rows.has(key)) {
+      rows.set(key, { user, lastMessage: null, unreadCount: 0 });
+    }
+  });
+  return [...rows.values()];
+}
+
+function chatPreview(conversation) {
+  const message = conversation?.lastMessage;
+  if (!message) return "Start a private conversation";
+  const prefix = message.mine ? "You: " : "";
+  return `${prefix}${message.body || ""}`;
+}
+
+function chatContactButton(conversation, selectedUserId) {
+  const user = conversation.user || {};
+  const selected = String(user.id) === String(selectedUserId);
+  return `
+    <button class="chat-contact ${selected ? "active" : ""}" type="button" data-action="open-chat" data-user-id="${escapeHtml(user.id)}">
+      <img src="${escapeHtml(avatarUrlFor(user))}" alt="">
+      <span>
+        <strong>${escapeHtml(user.fullName || "Quash user")}</strong>
+        <small>@${escapeHtml(user.username || "quashuser")} · ${escapeHtml(chatPreview(conversation))}</small>
+      </span>
+      ${conversation.unreadCount ? `<em>${compactNumber(conversation.unreadCount)}</em>` : ""}
+    </button>
+  `;
+}
+
+function chatMessageBubble(message) {
+  const mine = Boolean(message.mine);
+  const sender = message.sender || {};
+  return `
+    <article class="chat-message ${mine ? "mine" : ""}">
+      ${mine ? "" : `<img src="${escapeHtml(avatarUrlFor(sender))}" alt="">`}
+      <div>
+        <p>${escapeHtml(message.body || "")}</p>
+        <span>${mine ? "You" : escapeHtml(sender.fullName || "Quash user")} · ${timeAgo(message.createdAt)}</span>
+      </div>
+    </article>
+  `;
+}
+
 function applyUser(user) {
   if (!user) return;
   const avatarUrl = avatarUrlFor(user);
@@ -663,6 +838,18 @@ function mediaMarkup(post) {
     return `<video class="post-media" src="${mediaUrl}" controls muted playsinline></video>`;
   }
   return `<img class="post-media" src="${mediaUrl}" alt="">`;
+}
+
+function reelMediaMarkup(post) {
+  if (!post.mediaUrl) {
+    return `<div class="reel-text-backdrop"><span>Quash Reel</span></div>`;
+  }
+  const mediaUrl = escapeHtml(post.mediaUrl);
+  const isVideo = ["Video", "Reel"].includes(post.postType) || /\.(mp4|webm|ogg)(\?|$)/i.test(post.mediaUrl);
+  if (isVideo) {
+    return `<video class="reel-media" src="${mediaUrl}" controls muted loop playsinline preload="metadata"></video>`;
+  }
+  return `<img class="reel-media" src="${mediaUrl}" alt="">`;
 }
 
 function isReelPost(post) {
@@ -775,6 +962,76 @@ function postCard(post) {
   `;
 }
 
+function reelActionIcon(action) {
+  const icons = {
+    like: `<svg viewBox="0 0 24 24" focusable="false"><path d="M20.8 4.6c-1.7-1.7-4.4-1.7-6.1 0L12 7.3 9.3 4.6c-1.7-1.7-4.4-1.7-6.1 0s-1.7 4.5 0 6.2L12 19.6l8.8-8.8c1.7-1.7 1.7-4.5 0-6.2Z"></path></svg>`,
+    "toggle-comments": `<svg viewBox="0 0 24 24" focusable="false"><path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 9.8 9.8 0 0 1-4.1-.9L3 20l1.2-4.2a8.1 8.1 0 0 1-1-4.3 8.4 8.4 0 0 1 9-8.4 8.5 8.5 0 0 1 8.8 8.4Z"></path></svg>`,
+    share: `<svg viewBox="0 0 24 24" focusable="false"><path d="M22 3 10.5 14.5"></path><path d="m22 3-7 19-4.5-7.5L3 10l19-7Z"></path></svg>`,
+    "save-reel": `<svg viewBox="0 0 24 24" focusable="false"><path d="M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1Z"></path></svg>`
+  };
+  return icons[action] || `<svg viewBox="0 0 24 24" focusable="false"><path d="M12 5v14M5 12h14"></path></svg>`;
+}
+
+function reelActionButton({ action, postId, label, count, active = false }) {
+  return `
+    <button class="reel-action ${active ? "is-active" : ""}" type="button" data-action="${action}" data-post-id="${escapeHtml(postId)}">
+      <span class="reel-action-icon" aria-hidden="true">${reelActionIcon(action)}</span>
+      <span class="reel-action-label">${escapeHtml(label)}</span>
+      ${count !== undefined ? `<strong class="reel-action-count">${escapeHtml(count)}</strong>` : ""}
+    </button>
+  `;
+}
+
+function reelCard(post) {
+  const demoAttr = post.isDemo ? "data-demo='true'" : "";
+  const followLabel = post.author.following ? "Following" : "Follow";
+  const canFollow = currentUser()?.id !== post.author.id;
+  const commentCount = compactNumber(post.commentCount || (post.comments || []).length);
+  const saved = isReelSaved(post.id);
+  return `
+    <article class="reel-card-vertical post-card" id="post-${escapeHtml(post.id)}" data-post-id="${escapeHtml(post.id)}" ${demoAttr}>
+      <div class="reel-phone-frame">
+        <div class="reel-stage">
+          ${reelMediaMarkup(post)}
+          <div class="reel-shadow"></div>
+          <div class="reel-caption-panel">
+            <div class="reel-author-row">
+              <button class="reel-author-button" type="button" data-action="open-profile" data-user-id="${escapeHtml(post.author.id)}" aria-label="Open ${escapeHtml(post.author.fullName)} profile">
+                <img src="${escapeHtml(avatarUrlFor(post.author))}" alt="">
+                <span>
+                  <strong class="reel-author-name">${escapeHtml(post.author.fullName)}</strong>
+                  <small>@${escapeHtml(post.author.username)} · ${timeAgo(post.createdAt)}</small>
+                </span>
+              </button>
+              ${canFollow ? `<button class="reel-follow-button" type="button" data-action="follow-user" data-user-id="${escapeHtml(post.author.id)}">${followLabel}</button>` : ""}
+            </div>
+            <p class="reel-caption-text post-text">${escapeHtml(post.body)}</p>
+          </div>
+          <div class="reel-actions-rail" aria-label="Reel actions">
+            ${reelActionButton({ action: "like", postId: post.id, label: post.likedByMe ? "Liked" : "Like", count: compactNumber(post.likeCount), active: post.likedByMe })}
+            ${reelActionButton({ action: "toggle-comments", postId: post.id, label: "Comment", count: commentCount })}
+            ${reelActionButton({ action: "share", postId: post.id, label: post.sharedByMe ? "Shared" : "Share", count: compactNumber(post.shareCount), active: post.sharedByMe })}
+            ${reelActionButton({ action: "save-reel", postId: post.id, label: saved ? "Saved" : "Save", active: saved })}
+          </div>
+        </div>
+        ${commentsMarkup(post)}
+      </div>
+    </article>
+  `;
+}
+
+function setActionButtonState(button, label, countText, active = false) {
+  if (button.classList.contains("reel-action")) {
+    button.classList.toggle("is-active", Boolean(active));
+    const labelElement = button.querySelector(".reel-action-label");
+    const countElement = button.querySelector(".reel-action-count");
+    if (labelElement) labelElement.textContent = label;
+    if (countElement && countText !== undefined) countElement.textContent = countText;
+    return;
+  }
+  button.innerHTML = countText === undefined ? label : `${label} <span>${countText}</span>`;
+}
+
 async function loadPosts(params = "") {
   try {
     const data = await requestApi(`/api/posts${params}`);
@@ -856,14 +1113,14 @@ async function renderReels() {
     `
       <div class="page-head">
         <div>
-          <p class="eyebrow dark">Reels page</p>
-          <h1>Watch what creators are sharing now</h1>
-          <p>Short videos, reel updates, and visual stories from people across Quash.</p>
+          <p class="eyebrow dark">Reels</p>
+          <h1>Short updates in vertical format</h1>
+          <p>Watch 9:16 reels with quick like, comment, share, and save actions.</p>
         </div>
         <button class="page-action" type="button" data-action="compose-reel">Create reel</button>
       </div>
-      <div class="page-grid single">
-        ${reels.length ? reels.map(postCard).join("") : `<div class="empty-state compact"><p>No reels yet. Create the first reel update.</p></div>`}
+      <div class="reels-feed">
+        ${reels.length ? reels.map(reelCard).join("") : `<div class="empty-state compact"><p>No reels yet. Create the first reel update.</p></div>`}
       </div>
     `
   );
@@ -1119,6 +1376,7 @@ async function renderPublicProfile(userId) {
   const posts = [...(data.posts || [])].sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
   const stats = data.stats || { posts: posts.length, followers: profileUser.followers || 0, following: 0 };
   const canFollow = String(signedInUser?.id || "") !== String(profileUser.id || "");
+  const canMessage = canFollow && /^\d+$/.test(String(profileUser.id || ""));
   const followLabel = profileUser.following ? "Following" : "Follow";
 
   showPage(
@@ -1131,7 +1389,12 @@ async function renderPublicProfile(userId) {
           <h1>${escapeHtml(profileUser.fullName || "Quash user")}</h1>
           <p>@${escapeHtml(profileUser.username || "quashuser")} · ${escapeHtml(profileUser.bio || "Sharing thoughts, news, and daily updates on Quash.")}</p>
         </div>
-        ${canFollow ? `<button class="page-action profile-follow-action" type="button" data-action="follow-user" data-user-id="${escapeHtml(profileUser.id)}">${followLabel}</button>` : ""}
+        ${canFollow
+          ? `<div class="profile-action-row">
+              <button class="page-action profile-follow-action" type="button" data-action="follow-user" data-user-id="${escapeHtml(profileUser.id)}">${followLabel}</button>
+              ${canMessage ? `<button class="profile-link-copy" type="button" data-action="open-chat" data-user-id="${escapeHtml(profileUser.id)}">Message</button>` : ""}
+            </div>`
+          : ""}
       </section>
       <div class="profile-dashboard">
         <article><strong>${compactNumber(stats.posts)}</strong><span>Posts</span></article>
@@ -1159,6 +1422,118 @@ async function renderPublicProfile(userId) {
           <button class="profile-link-copy" type="button" data-action="copy-profile-link" data-user-id="${escapeHtml(profileUser.id)}">Copy profile link</button>
         </aside>
       </div>
+    `
+  );
+}
+
+async function renderMessages(selectedUserId = "") {
+  const signedInUser = currentUser();
+  if (!signedInUser) {
+    showPage(
+      "messages",
+      `
+        <div class="empty-state">
+          <h1>Messages</h1>
+          <p>Create an account or sign in to send private messages to other Quash users.</p>
+          <button class="page-action" type="button" data-action="login">Sign in</button>
+        </div>
+      `
+    );
+    return;
+  }
+
+  activeChatUserId = String(selectedUserId || activeChatUserId || "");
+
+  let inbox = { conversations: [], contacts: [] };
+  try {
+    inbox = await requestApi("/api/messages");
+  } catch (error) {
+    showPage(
+      "messages",
+      `
+        <div class="empty-state">
+          <h1>Messages unavailable</h1>
+          <p>${escapeHtml(error.message)}</p>
+          <button class="page-action" type="button" data-route="feed">Back to feed</button>
+        </div>
+      `
+    );
+    return;
+  }
+
+  const contactRows = mergeChatContacts(inbox.conversations, inbox.contacts);
+  if (!activeChatUserId && contactRows.length) {
+    activeChatUserId = String(contactRows[0].user.id);
+  }
+
+  let activeThread = null;
+  if (activeChatUserId) {
+    try {
+      activeThread = await requestApi(`/api/messages/${encodeURIComponent(activeChatUserId)}`);
+    } catch (error) {
+      activeThread = null;
+    }
+  }
+
+  const activeUser = activeThread?.user || contactRows.find((row) => String(row.user.id) === activeChatUserId)?.user || null;
+  const messages = activeThread?.messages || [];
+  const contactsMarkup = contactRows.length
+    ? contactRows.map((conversation) => chatContactButton(conversation, activeChatUserId)).join("")
+    : `<div class="empty-note chat-empty-note">Search people or open a public profile to start a message.</div>`;
+
+  showPage(
+    "messages",
+    `
+      <div class="page-head">
+        <div>
+          <p class="eyebrow dark">Messages</p>
+          <h1>Chat with Quash users</h1>
+          <p>Send private text messages, continue conversations, and connect from public profiles.</p>
+        </div>
+        <button class="page-action" type="button" data-action="focus-search">Find people</button>
+      </div>
+      <section class="chat-shell">
+        <aside class="chat-sidebar" aria-label="Conversations">
+          <div class="chat-sidebar-head">
+            <h2>Inbox</h2>
+            <span>${compactNumber(contactRows.length)} people</span>
+          </div>
+          <div class="chat-contact-list">
+            ${contactsMarkup}
+          </div>
+        </aside>
+        <section class="chat-panel" aria-label="Message thread">
+          ${activeUser
+            ? `
+              <div class="chat-thread-head">
+                <button class="chat-user-button" type="button" data-action="open-profile" data-user-id="${escapeHtml(activeUser.id)}">
+                  <img src="${escapeHtml(avatarUrlFor(activeUser))}" alt="">
+                  <span>
+                    <strong>${escapeHtml(activeUser.fullName || "Quash user")}</strong>
+                    <small>@${escapeHtml(activeUser.username || "quashuser")} · ${compactNumber(activeUser.followers || 0)} followers</small>
+                  </span>
+                </button>
+                <button class="profile-link-copy" type="button" data-action="follow-user" data-user-id="${escapeHtml(activeUser.id)}">${activeUser.following ? "Following" : "Follow"}</button>
+              </div>
+              <div class="chat-message-list">
+                ${messages.length
+                  ? messages.map(chatMessageBubble).join("")
+                  : `<div class="empty-note chat-empty-note">No messages yet. Say hello and start the conversation.</div>`}
+              </div>
+              <form class="chat-form" data-user-id="${escapeHtml(activeUser.id)}">
+                <input name="body" maxlength="1200" placeholder="Message @${escapeHtml(activeUser.username || "quashuser")}">
+                <button type="submit">Send</button>
+              </form>
+            `
+            : `
+              <div class="empty-state compact chat-start-state">
+                <h2>Choose someone to message</h2>
+                <p>Follow people, open public profiles, or search creators to begin a chat.</p>
+                <button class="page-action" type="button" data-action="focus-search">Find people</button>
+              </div>
+            `}
+        </section>
+      </section>
     `
   );
 }
@@ -1197,7 +1572,10 @@ async function renderSearch(query) {
                           <p>@${escapeHtml(user.username)} · ${compactNumber(user.followers)} followers</p>
                         </span>
                       </button>
-                      <button type="button" data-action="follow-user" data-user-id="${escapeHtml(user.id)}">${user.following ? "Following" : "Follow"}</button>
+                      <div class="person-card-actions">
+                        ${String(currentUser()?.id || "") !== String(user.id || "") ? `<button type="button" data-action="open-chat" data-user-id="${escapeHtml(user.id)}">Message</button>` : ""}
+                        <button type="button" data-action="follow-user" data-user-id="${escapeHtml(user.id)}">${user.following ? "Following" : "Follow"}</button>
+                      </div>
                     </article>
                   `
                 )
@@ -1220,6 +1598,8 @@ async function refreshCurrentPage() {
     await renderPublicProfile(activeProfileId);
   } else if (activeRoute === "reels") {
     await renderReels();
+  } else if (activeRoute === "messages") {
+    await renderMessages(activeChatUserId);
   } else if (activeRoute === "feed") {
     await renderFeed();
   } else if (activeTopic) {
@@ -1238,6 +1618,7 @@ async function navigate(route) {
   if (route === "reels") await renderReels();
   if (route === "communities") renderCommunities();
   if (route === "groups") renderGroups();
+  if (route === "messages") await renderMessages();
   if (route === "profile") await renderProfile();
 }
 
@@ -1270,8 +1651,12 @@ async function createPost() {
   try {
     let finalMediaUrl = mediaUrl;
     if (hasUpload) {
-      postButton.textContent = "Uploading...";
-      const uploaded = await uploadComposerMedia(uploadedComposerMedia.file);
+      postButton.textContent = uploadedComposerMedia.kind === "image" ? "Optimizing..." : "Checking file...";
+      const uploadFile = await prepareUploadFile(uploadedComposerMedia.file, uploadedComposerMedia.kind);
+      postButton.textContent = "Uploading 0%";
+      const uploaded = await uploadComposerMedia(uploadFile, (progress) => {
+        postButton.textContent = `Uploading ${progress}%`;
+      });
       finalMediaUrl = uploaded.mediaUrl || "";
     }
 
@@ -1363,6 +1748,13 @@ if (mediaPickerInput) {
   mediaPickerInput.addEventListener("change", () => {
     const file = mediaPickerInput.files?.[0];
     if (!file) return;
+    if (file.size > MAX_UPLOAD_BYTES) {
+      postButton.textContent = "File too large";
+      if (mediaHint) mediaHint.textContent = `Choose a file under ${formatBytes(MAX_UPLOAD_BYTES)}.`;
+      window.setTimeout(() => (postButton.textContent = "Notify"), 1800);
+      mediaPickerInput.value = "";
+      return;
+    }
 
     const inferredKind = file.type.startsWith("video/") ? "video" : file.type.startsWith("image/") ? "image" : "";
     if (!inferredKind) {
@@ -1464,6 +1856,32 @@ loginForm.addEventListener("submit", async (event) => {
 });
 
 document.addEventListener("submit", async (event) => {
+  const chatForm = event.target.closest(".chat-form");
+  if (chatForm) {
+    event.preventDefault();
+    if (!requireUser()) return;
+    const userId = chatForm.dataset.userId;
+    const input = chatForm.querySelector("input[name='body']");
+    const body = input.value.trim();
+    if (!body) return;
+    const sendButton = chatForm.querySelector("button");
+    sendButton.textContent = "Sending...";
+    try {
+      await requestApi(`/api/messages/${encodeURIComponent(userId)}`, {
+        method: "POST",
+        body: JSON.stringify({ body })
+      });
+      input.value = "";
+      await renderMessages(userId);
+      refreshNotifications();
+    } catch (error) {
+      input.placeholder = error.message;
+    } finally {
+      sendButton.textContent = "Send";
+    }
+    return;
+  }
+
   const form = event.target.closest(".comment-form");
   if (!form) return;
   event.preventDefault();
@@ -1498,7 +1916,7 @@ document.addEventListener("click", async (event) => {
   const routeLink = event.target.closest("[href^='#'], [data-route]");
   if (routeLink) {
     const route = routeLink.dataset.route || routeLink.getAttribute("href").replace("#", "");
-    if (["feed", "trending", "reels", "communities", "groups", "profile"].includes(route)) {
+    if (["feed", "trending", "reels", "communities", "groups", "messages", "profile"].includes(route)) {
       event.preventDefault();
       await navigate(route);
       history.replaceState(null, "", `#${route}`);
@@ -1517,6 +1935,22 @@ document.addEventListener("click", async (event) => {
     await renderPublicProfile(userId);
     const signedInUser = currentUser();
     history.replaceState(null, "", signedInUser && String(signedInUser.id) === String(userId) ? "#profile" : profileHashFor(userId));
+    return;
+  }
+  if (action === "open-chat") {
+    if (!requireUser()) return;
+    const userId = actionTarget.dataset.userId;
+    if (!userId) return;
+    activeTopic = "";
+    activeProfileId = "";
+    await renderMessages(userId);
+    history.replaceState(null, "", chatHashFor(userId));
+    return;
+  }
+  if (action === "focus-search") {
+    await navigate("feed");
+    searchInput.focus();
+    searchInput.placeholder = "Search people by name or username";
     return;
   }
   if (action === "compose-home" || action === "compose") {
@@ -1559,28 +1993,36 @@ document.addEventListener("click", async (event) => {
     return;
   }
   if (action === "toggle-comments") {
-    actionTarget.closest(".post-card").querySelector(".comment-section").classList.toggle("open");
+    const commentSection = actionTarget.closest(".post-card")?.querySelector(".comment-section");
+    if (commentSection) {
+      commentSection.classList.toggle("open");
+      if (actionTarget.closest(".reel-card-vertical") && commentSection.classList.contains("open")) {
+        commentSection.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      }
+    }
     return;
   }
   if (action === "like") {
     if (!requireUser()) return;
     const card = actionTarget.closest(".post-card");
     if (card.dataset.demo === "true") {
-      actionTarget.textContent = "Liked";
+      const currentCount = actionTarget.querySelector(".reel-action-count, span")?.textContent || "";
+      setActionButtonState(actionTarget, "Liked", currentCount, true);
       return;
     }
     const data = await requestApi(`/api/posts/${actionTarget.dataset.postId}/like`, { method: "POST", body: "{}" });
-    actionTarget.innerHTML = `${data.liked ? "Liked" : "Like"} <span>${compactNumber(data.likeCount)}</span>`;
+    setActionButtonState(actionTarget, data.liked ? "Liked" : "Like", compactNumber(data.likeCount), data.liked);
     refreshNotifications();
     return;
   }
   if (action === "share") {
     if (!requireUser()) return;
     const card = actionTarget.closest(".post-card");
-    const postText = card.querySelector(".post-text")?.textContent.trim() || "Quash update";
-    const shareTitle = card.querySelector(".post-author h3")?.textContent.trim() || "Quash";
+    const postText = card.querySelector(".reel-caption-text, .post-text")?.textContent.trim() || "Quash update";
+    const shareTitle = card.querySelector(".reel-author-name, .post-author h3")?.textContent.trim() || "Quash";
     const postId = actionTarget.dataset.postId;
-    const alreadyShared = actionTarget.textContent.trim().toLowerCase().startsWith("shared");
+    const shareLabel = actionTarget.querySelector(".reel-action-label")?.textContent || actionTarget.textContent;
+    const alreadyShared = shareLabel.trim().toLowerCase().startsWith("shared");
     shareContext = {
       postId,
       isDemo: card.dataset.demo === "true",
@@ -1594,6 +2036,12 @@ document.addEventListener("click", async (event) => {
       title: shareTitle,
       text: postText
     });
+    return;
+  }
+  if (action === "save-reel") {
+    if (!requireUser()) return;
+    const saved = toggleSavedReel(actionTarget.dataset.postId);
+    setActionButtonState(actionTarget, saved ? "Saved" : "Save", undefined, saved);
     return;
   }
   if (action === "follow-user") {
@@ -1700,8 +2148,8 @@ async function trackShareIntent(method) {
 
   if (shareContext.isDemo) {
     shareContext.alreadyShared = true;
-    const currentCount = shareContext.button.querySelector("span")?.textContent || "0";
-    shareContext.button.innerHTML = `Shared <span>${currentCount}</span>`;
+    const currentCount = shareContext.button.querySelector(".reel-action-count, span")?.textContent || "0";
+    setActionButtonState(shareContext.button, "Shared", currentCount, true);
     return;
   }
 
@@ -1711,7 +2159,7 @@ async function trackShareIntent(method) {
       body: JSON.stringify({ method })
     });
     shareContext.alreadyShared = true;
-    shareContext.button.innerHTML = `Shared <span>${compactNumber(data.shareCount)}</span>`;
+    setActionButtonState(shareContext.button, "Shared", compactNumber(data.shareCount), true);
     refreshNotifications();
   } catch (error) {
     shareMessage.textContent = "Could not track share. Try again.";
@@ -1767,7 +2215,11 @@ async function renderRouteFromHash() {
     await renderSearch(decodeURIComponent(initialRoute.replace("search-", "")));
     return true;
   }
-  if (["feed", "trending", "reels", "communities", "groups", "profile"].includes(initialRoute)) {
+  if (initialRoute.startsWith("messages-")) {
+    await renderMessages(decodeURIComponent(initialRoute.replace("messages-", "")));
+    return true;
+  }
+  if (["feed", "trending", "reels", "communities", "groups", "messages", "profile"].includes(initialRoute)) {
     await navigate(initialRoute);
     return true;
   }

@@ -1,3 +1,18 @@
+#ifdef _WIN32
+#if !defined(_WIN32_WINNT) || _WIN32_WINNT < 0x0A00
+#undef _WIN32_WINNT
+#define _WIN32_WINNT 0x0A00
+#endif
+#if !defined(NTDDI_VERSION) || NTDDI_VERSION < 0x0A000000
+#undef NTDDI_VERSION
+#define NTDDI_VERSION 0x0A000000
+#endif
+#if !defined(WINVER) || WINVER < _WIN32_WINNT
+#undef WINVER
+#define WINVER _WIN32_WINNT
+#endif
+#endif
+
 #include <algorithm>
 #include <chrono>
 #include <cctype>
@@ -50,8 +65,10 @@ constexpr size_t kMaxJsonBytes = 64 * 1024;
 constexpr int64_t kSessionTtlSeconds = 60 * 60 * 24 * 14;
 constexpr size_t kMaxPostBodyChars = 3000;
 constexpr size_t kMaxCommentBodyChars = 600;
+constexpr size_t kMaxMessageBodyChars = 1200;
 constexpr size_t kMaxMediaUrlChars = 1024;
 constexpr size_t kMaxUploadBytes = 25 * 1024 * 1024;
+constexpr int kShortReelMaxSeconds = 90;
 
 const std::regex kUsernameRe(R"(^[A-Za-z0-9_]{3,32}$)");
 const std::regex kEmailRe(R"(^[^\s@]+@[^\s@]+\.[^\s@]+$)");
@@ -575,7 +592,8 @@ public:
   }
 
   std::optional<json> create_post(int user_id, const std::string &post_type, const std::string &body,
-                                  const std::string &media_url, std::string &error,
+                                  const std::string &media_url,
+                                  std::optional<int> duration_seconds, std::string &error,
                                   int &status) {
     std::lock_guard<std::mutex> lock(mutex_);
     auto maybe_user = find_user_unlocked(user_id);
@@ -589,6 +607,16 @@ public:
     if (!contains_value(kAllowedPostTypes, normalized_type)) {
       normalized_type = "Text";
     }
+    if (duration_seconds && *duration_seconds > 0 &&
+        *duration_seconds <= kShortReelMaxSeconds && normalized_type == "Video") {
+      normalized_type = "Reel";
+    }
+    if (duration_seconds && *duration_seconds > kShortReelMaxSeconds &&
+        normalized_type == "Reel") {
+      error = "Reels can be 1:30 max. Trim this video or choose Video.";
+      status = 400;
+      return std::nullopt;
+    }
 
     const int64_t now = unix_now();
     const int post_id = next_id_unlocked("post");
@@ -600,6 +628,9 @@ public:
         {"mediaUrl", media_url},
         {"createdAt", now},
     };
+    if (duration_seconds && *duration_seconds > 0) {
+      post["durationSeconds"] = *duration_seconds;
+    }
     db_["posts"].push_back(post);
 
     const std::string username = (*maybe_user)->value("username", "");
@@ -990,6 +1021,169 @@ public:
     return json{{"notifications", out}, {"unreadCount", unread}};
   }
 
+  std::optional<json> conversations(int user_id, std::string &error, int &status) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!find_user_unlocked(user_id)) {
+      error = "Sign in to view messages.";
+      status = 401;
+      return std::nullopt;
+    }
+
+    std::unordered_map<int, json> last_by_partner;
+    std::unordered_map<int, int> unread_by_partner;
+    for (const auto &message : db_["messages"]) {
+      const int sender_id = message.value("senderId", 0);
+      const int recipient_id = message.value("recipientId", 0);
+      int partner_id = 0;
+      if (sender_id == user_id) {
+        partner_id = recipient_id;
+      } else if (recipient_id == user_id) {
+        partner_id = sender_id;
+        if (!message.value("isRead", false)) {
+          ++unread_by_partner[partner_id];
+        }
+      }
+      if (partner_id <= 0 || !find_user_unlocked(partner_id)) continue;
+
+      auto existing = last_by_partner.find(partner_id);
+      if (existing == last_by_partner.end() ||
+          message.value("createdAt", 0LL) > existing->second.value("createdAt", 0LL)) {
+        last_by_partner[partner_id] = message;
+      }
+    }
+
+    std::vector<int> partner_ids;
+    partner_ids.reserve(last_by_partner.size());
+    for (const auto &item : last_by_partner) {
+      partner_ids.push_back(item.first);
+    }
+    std::sort(partner_ids.begin(), partner_ids.end(), [&](int a, int b) {
+      return last_by_partner[a].value("createdAt", 0LL) >
+             last_by_partner[b].value("createdAt", 0LL);
+    });
+
+    json conversation_rows = json::array();
+    for (int partner_id : partner_ids) {
+      auto maybe_user = find_user_unlocked(partner_id);
+      if (!maybe_user) continue;
+      conversation_rows.push_back(
+          {{"user", public_user_unlocked(**maybe_user, false)},
+           {"lastMessage", public_message_unlocked(last_by_partner[partner_id], user_id)},
+           {"unreadCount", unread_by_partner[partner_id]}});
+    }
+
+    std::vector<const json *> contact_users;
+    for (const auto &user : db_["users"]) {
+      const int contact_id = user.value("id", 0);
+      if (contact_id <= 0 || contact_id == user_id) continue;
+      contact_users.push_back(&user);
+    }
+    std::sort(contact_users.begin(), contact_users.end(), [&](const json *a, const json *b) {
+      const bool a_following = is_following_unlocked(user_id, a->value("id", 0));
+      const bool b_following = is_following_unlocked(user_id, b->value("id", 0));
+      if (a_following != b_following) return a_following > b_following;
+      return a->value("createdAt", 0LL) > b->value("createdAt", 0LL);
+    });
+    if (contact_users.size() > 40) contact_users.resize(40);
+
+    json contact_rows = json::array();
+    for (const auto *user : contact_users) {
+      const int contact_id = user->value("id", 0);
+      auto public_user = public_user_unlocked(*user, false);
+      public_user["following"] = is_following_unlocked(user_id, contact_id);
+      public_user["followers"] = follower_count_unlocked(contact_id);
+      contact_rows.push_back(std::move(public_user));
+    }
+
+    return json{{"conversations", conversation_rows}, {"contacts", contact_rows}};
+  }
+
+  std::optional<json> conversation(int user_id, int other_id, std::string &error,
+                                   int &status) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto maybe_current = find_user_unlocked(user_id);
+    auto maybe_other = find_user_unlocked(other_id);
+    if (!maybe_current) {
+      error = "Sign in to view messages.";
+      status = 401;
+      return std::nullopt;
+    }
+    if (!maybe_other || other_id == user_id) {
+      error = "User not found.";
+      status = 404;
+      return std::nullopt;
+    }
+
+    bool changed = false;
+    std::vector<json *> rows;
+    for (auto &message : db_["messages"]) {
+      const int sender_id = message.value("senderId", 0);
+      const int recipient_id = message.value("recipientId", 0);
+      const bool in_thread =
+          (sender_id == user_id && recipient_id == other_id) ||
+          (sender_id == other_id && recipient_id == user_id);
+      if (!in_thread) continue;
+      if (recipient_id == user_id && !message.value("isRead", false)) {
+        message["isRead"] = true;
+        changed = true;
+      }
+      rows.push_back(&message);
+    }
+    std::sort(rows.begin(), rows.end(), [](const json *a, const json *b) {
+      return a->value("createdAt", 0LL) < b->value("createdAt", 0LL);
+    });
+    if (rows.size() > 80) {
+      rows.erase(rows.begin(), rows.end() - 80);
+    }
+
+    json message_rows = json::array();
+    for (const auto *message : rows) {
+      message_rows.push_back(public_message_unlocked(*message, user_id));
+    }
+    if (changed) save_unlocked();
+
+    auto public_other = public_user_unlocked(**maybe_other, false);
+    public_other["following"] = is_following_unlocked(user_id, other_id);
+    public_other["followers"] = follower_count_unlocked(other_id);
+    return json{{"user", public_other}, {"messages", message_rows}};
+  }
+
+  std::optional<json> create_message(int sender_id, int recipient_id, const std::string &body,
+                                     std::string &error, int &status) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto maybe_sender = find_user_unlocked(sender_id);
+    auto maybe_recipient = find_user_unlocked(recipient_id);
+    if (!maybe_sender) {
+      error = "Sign in before sending messages.";
+      status = 401;
+      return std::nullopt;
+    }
+    if (!maybe_recipient || sender_id == recipient_id) {
+      error = "User not found.";
+      status = 404;
+      return std::nullopt;
+    }
+
+    const int message_id = next_id_unlocked("message");
+    json message{
+        {"id", message_id},
+        {"senderId", sender_id},
+        {"recipientId", recipient_id},
+        {"body", body},
+        {"isRead", false},
+        {"createdAt", unix_now()},
+    };
+    db_["messages"].push_back(message);
+
+    create_notification_unlocked(
+        recipient_id, sender_id, "message",
+        "@" + (*maybe_sender)->value("username", "") + " sent you a message.",
+        std::nullopt, std::nullopt, "");
+
+    save_unlocked();
+    return json{{"message", public_message_unlocked(message, sender_id)}};
+  }
+
   void mark_notifications_read(int user_id) {
     std::lock_guard<std::mutex> lock(mutex_);
     for (auto &item : db_["notifications"]) {
@@ -1095,6 +1289,7 @@ private:
     if (!next_ids.contains("post")) next_ids["post"] = 1;
     if (!next_ids.contains("comment")) next_ids["comment"] = 1;
     if (!next_ids.contains("share")) next_ids["share"] = 1;
+    if (!next_ids.contains("message")) next_ids["message"] = 1;
     if (!next_ids.contains("notification")) next_ids["notification"] = 1;
 
     if (!db_.contains("users") || !db_["users"].is_array()) db_["users"] = json::array();
@@ -1103,6 +1298,7 @@ private:
     if (!db_.contains("comments") || !db_["comments"].is_array()) db_["comments"] = json::array();
     if (!db_.contains("likes") || !db_["likes"].is_array()) db_["likes"] = json::array();
     if (!db_.contains("shares") || !db_["shares"].is_array()) db_["shares"] = json::array();
+    if (!db_.contains("messages") || !db_["messages"].is_array()) db_["messages"] = json::array();
     if (!db_.contains("follows") || !db_["follows"].is_array()) db_["follows"] = json::array();
     if (!db_.contains("topicFollows") || !db_["topicFollows"].is_array()) {
       db_["topicFollows"] = json::array();
@@ -1164,6 +1360,24 @@ private:
     return std::nullopt;
   }
 
+  bool is_following_unlocked(int follower_id, int following_id) {
+    for (const auto &follow : db_["follows"]) {
+      if (follow.value("followerId", 0) == follower_id &&
+          follow.value("followingId", 0) == following_id) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  int follower_count_unlocked(int user_id) {
+    int followers = 0;
+    for (const auto &follow : db_["follows"]) {
+      if (follow.value("followingId", 0) == user_id) ++followers;
+    }
+    return followers;
+  }
+
   json public_user_unlocked(const json &user, bool include_email) {
     json out{
         {"id", user.value("id", 0)},
@@ -1194,6 +1408,27 @@ private:
         {"body", comment.value("body", "")},
         {"createdAt", comment.value("createdAt", 0LL)},
         {"author", author},
+    };
+  }
+
+  json public_message_unlocked(const json &message, int viewer_id) {
+    const int sender_id = message.value("senderId", 0);
+    auto maybe_sender = find_user_unlocked(sender_id);
+    json sender{
+        {"id", sender_id},
+        {"fullName", maybe_sender ? (*maybe_sender)->value("fullName", "") : ""},
+        {"username", maybe_sender ? (*maybe_sender)->value("username", "") : ""},
+        {"avatarUrl", maybe_sender ? (*maybe_sender)->value("avatarUrl", "") : ""},
+    };
+    return json{
+        {"id", message.value("id", 0)},
+        {"senderId", sender_id},
+        {"recipientId", message.value("recipientId", 0)},
+        {"body", message.value("body", "")},
+        {"isRead", message.value("isRead", false)},
+        {"mine", sender_id == viewer_id},
+        {"createdAt", message.value("createdAt", 0LL)},
+        {"sender", sender},
     };
   }
 
@@ -1263,6 +1498,7 @@ private:
         {"postType", post.value("postType", "Text")},
         {"body", post.value("body", "")},
         {"mediaUrl", post.value("mediaUrl", "")},
+        {"durationSeconds", post.value("durationSeconds", 0)},
         {"createdAt", post.value("createdAt", 0LL)},
         {"likeCount", like_count},
         {"commentCount", comment_count},
@@ -1595,6 +1831,20 @@ int main() {
 
     const std::string body = trim_copy(body_json->value("body", ""));
     const std::string media_url = trim_copy(body_json->value("mediaUrl", ""));
+    std::optional<int> duration_seconds;
+    if (body_json->contains("durationSeconds") && !(*body_json)["durationSeconds"].is_null()) {
+      const auto &duration_value = (*body_json)["durationSeconds"];
+      if (!duration_value.is_number()) {
+        send_json(req, res, {{"error", "Video duration must be a number of seconds."}}, 400);
+        return;
+      }
+      const int parsed_duration = static_cast<int>(duration_value.get<double>());
+      if (parsed_duration <= 0 || parsed_duration > 60 * 60) {
+        send_json(req, res, {{"error", "Video duration is invalid."}}, 400);
+        return;
+      }
+      duration_seconds = parsed_duration;
+    }
 
     if (body.size() > kMaxPostBodyChars) {
       send_json(req, res, {{"error", "Post text is too long."}}, 400);
@@ -1619,7 +1869,8 @@ int main() {
 
     std::string error;
     int status = 201;
-    auto created = store.create_post(*user_id, post_type, body, media_url, error, status);
+    auto created =
+        store.create_post(*user_id, post_type, body, media_url, duration_seconds, error, status);
     if (!created) {
       send_json(req, res, {{"error", error}}, status);
       return;
@@ -1850,6 +2101,83 @@ int main() {
                 }
                 send_json(req, res, {{"ok", true}});
               });
+
+  server.Get("/api/messages", [&](const httplib::Request &req, httplib::Response &res) {
+    auto user_id = require_user_id(req, res, store, "Sign in to view messages.");
+    if (!user_id) return;
+
+    std::string error;
+    int status = 200;
+    auto result = store.conversations(*user_id, error, status);
+    if (!result) {
+      send_json(req, res, {{"error", error}}, status);
+      return;
+    }
+    send_json(req, res, *result);
+  });
+
+  server.Get("/api/messages/:id", [&](const httplib::Request &req, httplib::Response &res) {
+    auto user_id = require_user_id(req, res, store, "Sign in to view messages.");
+    if (!user_id) return;
+
+    const auto id_text = req.path_params.at("id");
+    if (!std::regex_match(id_text, std::regex(R"(^\d+$)"))) {
+      send_json(req, res, {{"error", "Invalid user id."}}, 400);
+      return;
+    }
+
+    std::string error;
+    int status = 200;
+    auto result = store.conversation(*user_id, std::stoi(id_text), error, status);
+    if (!result) {
+      send_json(req, res, {{"error", error}}, status);
+      return;
+    }
+    send_json(req, res, *result);
+  });
+
+  server.Post("/api/messages/:id", [&](const httplib::Request &req, httplib::Response &res) {
+    auto user_id = require_user_id(req, res, store, "Sign in before sending messages.");
+    if (!user_id) return;
+    if (!store.allow_rate("write", client_fingerprint(req))) {
+      send_json(req, res, {{"error", "Too many write actions. Please wait and try again."}},
+                429);
+      return;
+    }
+
+    const auto id_text = req.path_params.at("id");
+    if (!std::regex_match(id_text, std::regex(R"(^\d+$)"))) {
+      send_json(req, res, {{"error", "Invalid user id."}}, 400);
+      return;
+    }
+
+    std::string parse_error;
+    int parse_status = 400;
+    auto body_json = parse_json_body(req, parse_error, parse_status);
+    if (!body_json) {
+      send_json(req, res, {{"error", parse_error}}, parse_status);
+      return;
+    }
+
+    const std::string body = trim_copy(body_json->value("body", ""));
+    if (body.empty()) {
+      send_json(req, res, {{"error", "Write a message before sending."}}, 400);
+      return;
+    }
+    if (body.size() > kMaxMessageBodyChars) {
+      send_json(req, res, {{"error", "Message is too long."}}, 400);
+      return;
+    }
+
+    std::string error;
+    int status = 201;
+    auto result = store.create_message(*user_id, std::stoi(id_text), body, error, status);
+    if (!result) {
+      send_json(req, res, {{"error", error}}, status);
+      return;
+    }
+    send_json(req, res, *result, 201);
+  });
 
   server.Get("/api/search", [&](const httplib::Request &req, httplib::Response &res) {
     const std::string query = req.has_param("q") ? trim_copy(req.get_param_value("q")) : "";
