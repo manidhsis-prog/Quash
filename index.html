@@ -9,7 +9,7 @@
       content="Quash is a social daily updates platform for news, trends, fashion, communities, groups, videos, reels, images, and posts."
     >
     <link rel="preconnect" href="https://images.unsplash.com">
-    <link rel="stylesheet" href="styles.css?v=26">
+    <link rel="stylesheet" href="styles.css?v=27">
     <link rel="stylesheet" href="reels-fix.css?v=24">
   </head>
   <body class="auth-locked">
@@ -58,19 +58,10 @@
           </label>
           <button class="auth-submit" type="submit">Create account</button>
         </form>
-        <form class="auth-form gate-login-form hidden" data-gate-panel="login">
+        <div class="auth-form gate-social-panel hidden" data-gate-panel="login">
           <h1>Sign in to Quash</h1>
-          <p>Use your account to continue.</p>
-          <label>
-            Email or username
-            <input name="identifier" autocomplete="username" required maxlength="160">
-          </label>
-          <label>
-            Password
-            <input name="password" type="password" autocomplete="current-password" required>
-          </label>
-          <button class="auth-submit" type="submit">Sign in</button>
-        </form>
+          <p>Password login is disabled. Continue with Google or Facebook.</p>
+        </div>
         <p class="auth-message gate-auth-message" role="status"></p>
       </div>
     </section>
@@ -388,24 +379,15 @@
           </label>
           <button class="auth-submit" type="submit">Create account</button>
         </form>
-        <form class="auth-form login-form hidden" data-auth-panel="login">
-          <h2>Welcome back</h2>
-          <p>Sign in to load your saved Quash profile.</p>
-          <label>
-            Email or username
-            <input name="identifier" autocomplete="username" required maxlength="160">
-          </label>
-          <label>
-            Password
-            <input name="password" type="password" autocomplete="current-password" required>
-          </label>
-          <button class="auth-submit" type="submit">Sign in</button>
-        </form>
+        <div class="auth-form login-social-panel hidden" data-auth-panel="login">
+          <h2>Sign in to Quash</h2>
+          <p>Password login is disabled. Continue with Google or Facebook.</p>
+        </div>
         <p class="auth-message" role="status"></p>
       </div>
     </div>
 
-    <script src="app.js?v=26"></script>
+    <script src="app.js?v=27"></script>
     <script src="reels-fix.js?v=24"></script>
   </body>
 </html>

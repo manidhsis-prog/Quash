@@ -1716,35 +1716,10 @@ int main() {
   });
 
   server.Post("/api/login", [&](const httplib::Request &req, httplib::Response &res) {
-    if (!store.allow_rate("login", client_fingerprint(req))) {
-      send_json(req, res, {{"error", "Too many login attempts. Please wait and try again."}},
-                429);
-      return;
-    }
-
-    std::string parse_error;
-    int parse_status = 400;
-    auto body = parse_json_body(req, parse_error, parse_status);
-    if (!body) {
-      send_json(req, res, {{"error", parse_error}}, parse_status);
-      return;
-    }
-
-    const std::string identifier = lower_copy(trim_copy(body->value("identifier", "")));
-    const std::string password = body->value("password", "");
-    if (identifier.empty() || password.empty()) {
-      send_json(req, res, {{"error", "Identifier and password are required."}}, 400);
-      return;
-    }
-
-    std::string error;
-    int status = 200;
-    auto result = store.login_user(identifier, password, error, status);
-    if (!result) {
-      send_json(req, res, {{"error", error}}, status);
-      return;
-    }
-    send_json(req, res, *result);
+    send_json(req, res,
+              {{"error",
+                "Password login is disabled. Continue with Google or Facebook, or create a new Quash account."}},
+              403);
   });
 
   server.Get("/api/auth/google", [&](const httplib::Request &req, httplib::Response &res) {

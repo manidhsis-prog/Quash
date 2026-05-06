@@ -24,9 +24,7 @@ const gateAuthTabs = document.querySelectorAll("[data-gate-tab]");
 const gateAuthPanels = document.querySelectorAll("[data-gate-panel]");
 const gateAuthMessage = document.querySelector(".gate-auth-message");
 const signupForm = document.querySelector(".signup-form");
-const loginForm = document.querySelector(".login-form");
 const gateSignupForm = document.querySelector(".gate-signup-form");
-const gateLoginForm = document.querySelector(".gate-login-form");
 const authOpenButton = document.querySelector(".auth-open");
 const loginOpenButton = document.querySelector(".login-open");
 const authCloseButton = document.querySelector(".auth-close");
@@ -448,23 +446,6 @@ async function submitSignupForm(form, messageTarget) {
     setAuthMessage(messageTarget, "Account created. You are logged in.", "success");
     form.reset();
     await enterAuthenticatedApp("profile");
-  } catch (error) {
-    setAuthMessage(messageTarget, error.message, "error");
-  }
-}
-
-async function submitLoginForm(form, messageTarget) {
-  const formData = new FormData(form);
-  setAuthMessage(messageTarget, "Signing in...");
-  try {
-    const data = await requestApi("/api/login", {
-      method: "POST",
-      body: JSON.stringify(Object.fromEntries(formData))
-    });
-    saveSession(data);
-    setAuthMessage(messageTarget, "Signed in.", "success");
-    form.reset();
-    await enterAuthenticatedApp("feed");
   } catch (error) {
     setAuthMessage(messageTarget, error.message, "error");
   }
@@ -1871,19 +1852,9 @@ signupForm.addEventListener("submit", (event) => {
   submitSignupForm(signupForm, authMessage);
 });
 
-loginForm.addEventListener("submit", (event) => {
-  event.preventDefault();
-  submitLoginForm(loginForm, authMessage);
-});
-
 gateSignupForm.addEventListener("submit", (event) => {
   event.preventDefault();
   submitSignupForm(gateSignupForm, gateAuthMessage);
-});
-
-gateLoginForm.addEventListener("submit", (event) => {
-  event.preventDefault();
-  submitLoginForm(gateLoginForm, gateAuthMessage);
 });
 
 document.addEventListener("submit", async (event) => {
