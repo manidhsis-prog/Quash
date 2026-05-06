@@ -89,3 +89,22 @@ This repo also includes a root `Dockerfile` and `render.yaml` for a quick Render
 - Free hosting target: Render web service on a public `*.onrender.com` subdomain.
 - Important limit: free Render Postgres databases expire after 30 days, and free services are for testing/feedback, not production.
 - Account creation still has to be confirmed by the owner of the Gmail account in the Render signup page.
+
+### Social Login Setup
+
+Add these secret environment variables in Render before Google or Facebook login can complete:
+
+```text
+GOOGLE_CLIENT_ID
+GOOGLE_CLIENT_SECRET
+FACEBOOK_APP_ID
+FACEBOOK_APP_SECRET
+PUBLIC_BASE_URL=https://quash.onrender.com
+```
+
+Use these OAuth callback URLs in the provider dashboards:
+
+```text
+https://quash.onrender.com/api/auth/google/callback
+https://quash.onrender.com/api/auth/facebook/callback
+```

@@ -142,6 +142,31 @@ function currentToken() {
   return localStorage.getItem(SESSION_TOKEN_KEY) || "";
 }
 
+function decodeBase64UrlJson(payload) {
+  const normalized = payload.replace(/-/g, "+").replace(/_/g, "/");
+  const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "=");
+  const binary = atob(padded);
+  const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+  return JSON.parse(new TextDecoder().decode(bytes));
+}
+
+function consumeOauthSessionFromHash() {
+  const hash = window.location.hash || "";
+  if (!hash.startsWith("#oauth-")) return false;
+  try {
+    const data = decodeBase64UrlJson(hash.slice("#oauth-".length));
+    if (!data?.token || !data?.user) throw new Error("Missing session data.");
+    saveSession(data);
+    history.replaceState(null, "", "#feed");
+    return true;
+  } catch (error) {
+    clearSession();
+    history.replaceState(null, "", "");
+    showAllAuthMessages("Social sign-in could not be completed. Please try again.", "error");
+    return false;
+  }
+}
+
 function readJsonArray(key) {
   const raw = localStorage.getItem(key);
   if (!raw) return [];
@@ -451,14 +476,11 @@ async function submitLoginForm(form, messageTarget) {
   }
 }
 
-async function startSocialLogin(provider) {
+function startSocialLogin(provider) {
+  const safeProvider = provider === "facebook" ? "facebook" : "google";
   const providerName = socialProviderName(provider);
-  showAllAuthMessages(`Checking ${providerName} sign-in setup...`);
-  try {
-    await requestApi(`/api/auth/${encodeURIComponent(provider)}`);
-  } catch (error) {
-    showAllAuthMessages(error.message, "error");
-  }
+  showAllAuthMessages(`Opening ${providerName} sign-in...`);
+  window.location.assign(`${API_BASE}/api/auth/${encodeURIComponent(safeProvider)}`);
 }
 
 function mediaKindForMode(mode) {
@@ -2189,6 +2211,7 @@ searchInput.addEventListener("keydown", (event) => {
 
 async function bootstrapApp() {
   hydrateLocalUploadedPosts();
+  consumeOauthSessionFromHash();
 
   const storedUser = currentUser();
   const storedToken = currentToken();

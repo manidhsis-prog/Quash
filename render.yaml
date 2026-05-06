@@ -10,3 +10,5 @@ services:
     envVars:
       - key: HOST
         value: 0.0.0.0
+      - key: PUBLIC_BASE_URL
+        value: https://quash.onrender.com

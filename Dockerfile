@@ -8,7 +8,7 @@ WORKDIR /src
 COPY cpp_backend/server.cpp cpp_backend/server.cpp
 COPY cpp_backend/third_party cpp_backend/third_party
 
-RUN g++ -std=c++17 -O2 -Wall -Wextra \
+RUN g++ -std=c++17 -O2 -Wall -Wextra -DCPPHTTPLIB_OPENSSL_SUPPORT \
     -Icpp_backend/third_party cpp_backend/server.cpp \
     -o /quash_server -lssl -lcrypto -pthread
 

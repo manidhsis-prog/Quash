@@ -63,6 +63,7 @@ constexpr const char *kDefaultHost = "127.0.0.1";
 constexpr int kDefaultPort = 8000;
 constexpr size_t kMaxJsonBytes = 64 * 1024;
 constexpr int64_t kSessionTtlSeconds = 60 * 60 * 24 * 14;
+constexpr int64_t kOAuthStateTtlSeconds = 10 * 60;
 constexpr size_t kMaxPostBodyChars = 3000;
 constexpr size_t kMaxCommentBodyChars = 600;
 constexpr size_t kMaxMessageBodyChars = 1200;
@@ -266,6 +267,39 @@ std::string base64url_encode(const std::vector<uint8_t> &input) {
   return out;
 }
 
+std::string base64url_encode_string(const std::string &input) {
+  return base64url_encode(std::vector<uint8_t>(input.begin(), input.end()));
+}
+
+std::string url_encode(const std::string &value) {
+  static constexpr char kHex[] = "0123456789ABCDEF";
+  std::string out;
+  out.reserve(value.size() * 3);
+  for (unsigned char c : value) {
+    if (std::isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~') {
+      out.push_back(static_cast<char>(c));
+    } else {
+      out.push_back('%');
+      out.push_back(kHex[(c >> 4) & 0x0F]);
+      out.push_back(kHex[c & 0x0F]);
+    }
+  }
+  return out;
+}
+
+std::string query_from_params(const httplib::Params &params) {
+  std::string out;
+  bool first = true;
+  for (const auto &param : params) {
+    if (!first) out.push_back('&');
+    first = false;
+    out += url_encode(param.first);
+    out.push_back('=');
+    out += url_encode(param.second);
+  }
+  return out;
+}
+
 bool constant_time_equals(const std::vector<uint8_t> &a, const std::vector<uint8_t> &b) {
   if (a.size() != b.size()) return false;
   uint8_t diff = 0;
@@ -382,6 +416,118 @@ std::optional<json> parse_json_body(const httplib::Request &req, std::string &er
     error_status = 400;
     return std::nullopt;
   }
+}
+
+std::string html_escape(const std::string &value) {
+  std::string out;
+  out.reserve(value.size());
+  for (char c : value) {
+    switch (c) {
+    case '&':
+      out += "&amp;";
+      break;
+    case '<':
+      out += "&lt;";
+      break;
+    case '>':
+      out += "&gt;";
+      break;
+    case '"':
+      out += "&quot;";
+      break;
+    case '\'':
+      out += "&#039;";
+      break;
+    default:
+      out.push_back(c);
+      break;
+    }
+  }
+  return out;
+}
+
+std::string strip_trailing_slashes(std::string value) {
+  while (value.size() > 1 && value.back() == '/') value.pop_back();
+  return value;
+}
+
+std::string app_base_url(const httplib::Request &req) {
+  const std::string configured = env_string("PUBLIC_BASE_URL", "");
+  if (!configured.empty()) return strip_trailing_slashes(configured);
+
+  std::string proto = trim_copy(req.get_header_value("X-Forwarded-Proto"));
+  if (proto.empty()) proto = "http";
+  const auto comma = proto.find(',');
+  if (comma != std::string::npos) proto = trim_copy(proto.substr(0, comma));
+
+  std::string host = trim_copy(req.get_header_value("X-Forwarded-Host"));
+  if (host.empty()) host = trim_copy(req.get_header_value("Host"));
+  if (host.empty()) host = "127.0.0.1:8000";
+  return strip_trailing_slashes(proto + "://" + host);
+}
+
+std::string oauth_redirect_uri(const httplib::Request &req, const std::string &provider) {
+  return app_base_url(req) + "/api/auth/" + provider + "/callback";
+}
+
+void send_html_message(const httplib::Request &req, httplib::Response &res,
+                       const std::string &title, const std::string &message,
+                       int status = 200) {
+  attach_security_headers(req, res);
+  res.status = status;
+  const std::string body =
+      "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">"
+      "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+      "<title>" + html_escape(title) + "</title>"
+      "<style>body{margin:0;font-family:Arial,sans-serif;background:#f5f8fb;color:#10202e;}"
+      ".wrap{min-height:100vh;display:grid;place-items:center;padding:24px;}"
+      ".box{max-width:560px;background:white;border:1px solid #d8e2ec;border-radius:12px;"
+      "padding:28px;box-shadow:0 18px 45px rgba(12,32,48,.12)}"
+      "h1{font-size:24px;margin:0 0 12px}p{font-size:16px;line-height:1.5;margin:0 0 20px}"
+      "a{display:inline-block;background:#008c95;color:white;text-decoration:none;padding:12px 18px;"
+      "border-radius:8px;font-weight:700}</style></head><body><main class=\"wrap\"><section class=\"box\">"
+      "<h1>" + html_escape(title) + "</h1><p>" + html_escape(message) + "</p>"
+      "<a href=\"/index.html\">Back to Quash</a></section></main></body></html>";
+  res.set_content(body, "text/html; charset=utf-8");
+}
+
+void redirect_to(const httplib::Request &req, httplib::Response &res, const std::string &url) {
+  attach_security_headers(req, res);
+  res.status = 302;
+  res.set_header("Location", url);
+  res.set_content("Redirecting", "text/plain");
+}
+
+std::optional<json> provider_json_result(const httplib::Result &result,
+                                         const std::string &provider,
+                                         std::string &error) {
+  if (!result) {
+    error = provider + " could not be reached. Please try again.";
+    return std::nullopt;
+  }
+
+  json parsed = json::object();
+  if (!result->body.empty()) {
+    try {
+      parsed = json::parse(result->body);
+    } catch (...) {
+      error = provider + " returned a response Quash could not read.";
+      return std::nullopt;
+    }
+  }
+
+  if (result->status < 200 || result->status >= 300) {
+    error = parsed.value("error_description", parsed.value("error", provider + " sign-in failed."));
+    if (error.empty()) error = provider + " sign-in failed.";
+    return std::nullopt;
+  }
+  return parsed;
+}
+
+void redirect_oauth_success(const httplib::Request &req, httplib::Response &res,
+                            const json &session) {
+  const std::string payload = base64url_encode_string(session.dump());
+  redirect_to(req, res, app_base_url(req) + "/index.html#oauth-" + payload);
 }
 
 std::optional<std::string> upload_extension_for_content_type(const std::string &content_type) {
@@ -524,6 +670,121 @@ public:
     }
 
     const int64_t now = unix_now();
+    const std::string token = generate_token();
+    db_["sessions"].push_back(
+        {{"token", token},
+         {"userId", user_ptr->value("id", 0)},
+         {"createdAt", now},
+         {"expiresAt", now + kSessionTtlSeconds}});
+    save_unlocked();
+
+    return json{
+        {"token", token},
+        {"user", public_user_unlocked(*user_ptr, true)},
+    };
+  }
+
+  std::string create_oauth_state(const std::string &provider) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    const int64_t now = unix_now();
+    cleanup_expired_oauth_states_unlocked(now);
+    const std::string state = generate_token();
+    db_["oauthStates"].push_back(
+        {{"provider", provider},
+         {"state", state},
+         {"createdAt", now},
+         {"expiresAt", now + kOAuthStateTtlSeconds}});
+    save_unlocked();
+    return state;
+  }
+
+  bool consume_oauth_state(const std::string &provider, const std::string &state) {
+    if (state.empty()) return false;
+    std::lock_guard<std::mutex> lock(mutex_);
+    cleanup_expired_oauth_states_unlocked(unix_now());
+    auto &states = db_["oauthStates"];
+    for (auto it = states.begin(); it != states.end(); ++it) {
+      if (it->value("provider", "") == provider && it->value("state", "") == state) {
+        states.erase(it);
+        save_unlocked();
+        return true;
+      }
+    }
+    save_unlocked();
+    return false;
+  }
+
+  std::optional<json> login_oauth_user(const std::string &provider,
+                                       const std::string &provider_id,
+                                       const std::string &email,
+                                       const std::string &full_name,
+                                       const std::string &avatar_url,
+                                       std::string &error, int &status) {
+    const std::string provider_field =
+        provider == "facebook" ? "facebookId" : provider == "google" ? "googleId" : "";
+    if (provider_field.empty() || provider_id.empty()) {
+      error = "Social sign-in did not return a valid account id.";
+      status = 400;
+      return std::nullopt;
+    }
+
+    std::lock_guard<std::mutex> lock(mutex_);
+    const int64_t now = unix_now();
+    cleanup_expired_sessions_unlocked(now);
+
+    const std::string email_lower = lower_copy(trim_copy(email));
+    const std::string name =
+        trim_copy(full_name).empty() ? oauth_display_name(email_lower, provider) : trim_copy(full_name);
+    json *user_ptr = nullptr;
+
+    for (auto &user : db_["users"]) {
+      if (user.value(provider_field, "") == provider_id) {
+        user_ptr = &user;
+        break;
+      }
+    }
+
+    if (!user_ptr && !email_lower.empty()) {
+      for (auto &user : db_["users"]) {
+        if (lower_copy(user.value("email", "")) == email_lower) {
+          user_ptr = &user;
+          break;
+        }
+      }
+    }
+
+    if (user_ptr) {
+      (*user_ptr)[provider_field] = provider_id;
+      (*user_ptr)["authProvider"] = provider;
+      if (!email_lower.empty() && user_ptr->value("email", "").empty()) {
+        (*user_ptr)["email"] = email_lower;
+      }
+      if (!name.empty() && user_ptr->value("fullName", "").empty()) {
+        (*user_ptr)["fullName"] = name;
+      }
+      if (!avatar_url.empty() && user_ptr->value("avatarUrl", "").empty()) {
+        (*user_ptr)["avatarUrl"] = avatar_url;
+      }
+    } else {
+      const int user_id = next_id_unlocked("user");
+      json user{
+          {"id", user_id},
+          {"fullName", name},
+          {"username", unique_username_unlocked(oauth_username_seed(email_lower, name, provider_id))},
+          {"email", email_lower},
+          {"phone", ""},
+          {"passwordHash", ""},
+          {"bio", "Connecting with the world on Quash."},
+          {"avatarUrl", avatar_url},
+          {"authProvider", provider},
+          {"googleId", provider == "google" ? provider_id : ""},
+          {"facebookId", provider == "facebook" ? provider_id : ""},
+          {"createdAt", now},
+      };
+      db_["users"].push_back(user);
+      user_ptr = &db_["users"].back();
+    }
+
     const std::string token = generate_token();
     db_["sessions"].push_back(
         {{"token", token},
@@ -1308,6 +1569,9 @@ private:
 
     if (!db_.contains("users") || !db_["users"].is_array()) db_["users"] = json::array();
     if (!db_.contains("sessions") || !db_["sessions"].is_array()) db_["sessions"] = json::array();
+    if (!db_.contains("oauthStates") || !db_["oauthStates"].is_array()) {
+      db_["oauthStates"] = json::array();
+    }
     if (!db_.contains("posts") || !db_["posts"].is_array()) db_["posts"] = json::array();
     if (!db_.contains("comments") || !db_["comments"].is_array()) db_["comments"] = json::array();
     if (!db_.contains("likes") || !db_["likes"].is_array()) db_["likes"] = json::array();
@@ -1322,6 +1586,9 @@ private:
     }
     for (auto &user : db_["users"]) {
       if (!user.contains("phone")) user["phone"] = "";
+      if (!user.contains("googleId")) user["googleId"] = "";
+      if (!user.contains("facebookId")) user["facebookId"] = "";
+      if (!user.contains("authProvider")) user["authProvider"] = "password";
     }
   }
 
@@ -1340,6 +1607,79 @@ private:
     return base64url_encode(random_bytes(32));
   }
 
+  static std::string oauth_display_name(const std::string &email,
+                                        const std::string &provider) {
+    if (!email.empty()) {
+      const auto at = email.find('@');
+      std::string name = at == std::string::npos ? email : email.substr(0, at);
+      for (auto &c : name) {
+        if (c == '.' || c == '_' || c == '-') c = ' ';
+      }
+      if (!trim_copy(name).empty()) return trim_copy(name);
+    }
+    return provider == "facebook" ? "Facebook User" : "Google User";
+  }
+
+  static std::string oauth_username_seed(const std::string &email,
+                                         const std::string &full_name,
+                                         const std::string &provider_id) {
+    std::string source;
+    if (!email.empty()) {
+      const auto at = email.find('@');
+      source = at == std::string::npos ? email : email.substr(0, at);
+    } else if (!full_name.empty()) {
+      source = full_name;
+    } else {
+      source = "quash_" + provider_id;
+    }
+
+    std::string seed;
+    bool last_underscore = false;
+    for (unsigned char c : source) {
+      if (std::isalnum(c)) {
+        seed.push_back(static_cast<char>(std::tolower(c)));
+        last_underscore = false;
+      } else if (!last_underscore) {
+        seed.push_back('_');
+        last_underscore = true;
+      }
+      if (seed.size() >= 24) break;
+    }
+    while (!seed.empty() && seed.front() == '_') seed.erase(seed.begin());
+    while (!seed.empty() && seed.back() == '_') seed.pop_back();
+    if (seed.size() < 3) seed = "quash_user";
+    return seed;
+  }
+
+  bool username_taken_unlocked(const std::string &username) {
+    const std::string needle = lower_copy(username);
+    for (const auto &user : db_["users"]) {
+      if (lower_copy(user.value("username", "")) == needle) return true;
+    }
+    return false;
+  }
+
+  std::string unique_username_unlocked(const std::string &seed) {
+    std::string root = seed.empty() ? "quash_user" : seed;
+    if (root.size() > 24) root.resize(24);
+    if (std::regex_match(root, kUsernameRe) && !username_taken_unlocked(root)) {
+      return root;
+    }
+
+    for (int suffix = 2; suffix < 100000; ++suffix) {
+      const std::string suffix_text = "_" + std::to_string(suffix);
+      std::string candidate_root = root;
+      if (candidate_root.size() + suffix_text.size() > 32) {
+        candidate_root.resize(32 - suffix_text.size());
+      }
+      const std::string candidate = candidate_root + suffix_text;
+      if (std::regex_match(candidate, kUsernameRe) && !username_taken_unlocked(candidate)) {
+        return candidate;
+      }
+    }
+    return "quash_" + std::to_string(next_id_unlocked("user"));
+  }
+
   void cleanup_expired_sessions_unlocked(int64_t now) {
     auto &sessions = db_["sessions"];
     sessions.erase(std::remove_if(sessions.begin(), sessions.end(),
@@ -1347,6 +1687,15 @@ private:
                                     return session.value("expiresAt", 0LL) <= now;
                                   }),
                    sessions.end());
+  }
+
+  void cleanup_expired_oauth_states_unlocked(int64_t now) {
+    auto &states = db_["oauthStates"];
+    states.erase(std::remove_if(states.begin(), states.end(),
+                                [&](const json &state) {
+                                  return state.value("expiresAt", 0LL) <= now;
+                                }),
+                 states.end());
   }
 
   std::optional<json *> find_user_unlocked(int user_id) {
@@ -1713,23 +2062,202 @@ int main() {
     send_json(req, res, *result);
   });
 
+  auto begin_social_auth = [&](const httplib::Request &req, httplib::Response &res,
+                               const std::string &provider) {
+    const bool is_facebook = provider == "facebook";
+    const std::string provider_label = is_facebook ? "Facebook" : "Google";
+    const std::string client_id =
+        env_string(is_facebook ? "FACEBOOK_APP_ID" : "GOOGLE_CLIENT_ID", "");
+    const std::string client_secret =
+        env_string(is_facebook ? "FACEBOOK_APP_SECRET" : "GOOGLE_CLIENT_SECRET", "");
+    if (client_id.empty() || client_secret.empty()) {
+      send_html_message(req, res, provider_label + " sign-in is not configured",
+                        provider_label +
+                            " sign-in is active in the Quash code, but Render still needs the "
+                            "client id and secret environment variables before people can use it.",
+                        503);
+      return;
+    }
+
+    const std::string state = store.create_oauth_state(provider);
+    const std::string redirect_uri = oauth_redirect_uri(req, provider);
+    httplib::Params params{
+        {"client_id", client_id},
+        {"redirect_uri", redirect_uri},
+        {"response_type", "code"},
+        {"state", state},
+    };
+
+    std::string auth_url;
+    if (is_facebook) {
+      params.emplace("scope", "email,public_profile");
+      auth_url = "https://www.facebook.com/v19.0/dialog/oauth?" + query_from_params(params);
+    } else {
+      params.emplace("scope", "openid email profile");
+      params.emplace("prompt", "select_account");
+      auth_url = "https://accounts.google.com/o/oauth2/v2/auth?" + query_from_params(params);
+    }
+    redirect_to(req, res, auth_url);
+  };
+
+  auto finish_social_auth = [&](const httplib::Request &req, httplib::Response &res,
+                                const std::string &provider) {
+    const bool is_facebook = provider == "facebook";
+    const std::string provider_label = is_facebook ? "Facebook" : "Google";
+    if (req.has_param("error")) {
+      send_html_message(req, res, provider_label + " sign-in was cancelled",
+                        req.get_param_value("error"), 400);
+      return;
+    }
+
+    const std::string code = req.has_param("code") ? req.get_param_value("code") : "";
+    const std::string state = req.has_param("state") ? req.get_param_value("state") : "";
+    if (code.empty() || state.empty() || !store.consume_oauth_state(provider, state)) {
+      send_html_message(req, res, provider_label + " sign-in expired",
+                        "Please start sign-in again from Quash.", 400);
+      return;
+    }
+
+    const std::string client_id =
+        env_string(is_facebook ? "FACEBOOK_APP_ID" : "GOOGLE_CLIENT_ID", "");
+    const std::string client_secret =
+        env_string(is_facebook ? "FACEBOOK_APP_SECRET" : "GOOGLE_CLIENT_SECRET", "");
+    if (client_id.empty() || client_secret.empty()) {
+      send_html_message(req, res, provider_label + " sign-in is not configured",
+                        "The provider secret is missing on Render.", 503);
+      return;
+    }
+
+    const std::string redirect_uri = oauth_redirect_uri(req, provider);
+    std::string error;
+    std::optional<json> session;
+    int status = 200;
+
+    if (is_facebook) {
+      httplib::Client graph("https://graph.facebook.com");
+      httplib::Headers headers{{"Accept", "application/json"}};
+      httplib::Params token_params{
+          {"client_id", client_id},
+          {"redirect_uri", redirect_uri},
+          {"client_secret", client_secret},
+          {"code", code},
+      };
+      auto token_json =
+          provider_json_result(graph.Get("/v19.0/oauth/access_token", token_params, headers),
+                               provider_label, error);
+      if (!token_json) {
+        send_html_message(req, res, provider_label + " sign-in failed", error, 502);
+        return;
+      }
+
+      const std::string access_token = token_json->value("access_token", "");
+      if (access_token.empty()) {
+        send_html_message(req, res, provider_label + " sign-in failed",
+                          "Facebook did not return an access token.", 502);
+        return;
+      }
+
+      httplib::Params profile_params{
+          {"access_token", access_token},
+          {"fields", "id,name,email,picture.type(large)"},
+      };
+      auto profile_json =
+          provider_json_result(graph.Get("/v19.0/me", profile_params, headers), provider_label,
+                               error);
+      if (!profile_json) {
+        send_html_message(req, res, provider_label + " sign-in failed", error, 502);
+        return;
+      }
+
+      const std::string provider_id = profile_json->value("id", "");
+      std::string picture;
+      if (profile_json->contains("picture") && (*profile_json)["picture"].is_object()) {
+        const auto &picture_obj = (*profile_json)["picture"];
+        if (picture_obj.contains("data") && picture_obj["data"].is_object()) {
+          picture = picture_obj["data"].value("url", "");
+        }
+      }
+      session = store.login_oauth_user("facebook", provider_id, profile_json->value("email", ""),
+                                       profile_json->value("name", ""), picture, error, status);
+    } else {
+      httplib::Client google_token("https://oauth2.googleapis.com");
+      httplib::Headers headers{{"Accept", "application/json"}};
+      httplib::Params token_params{
+          {"code", code},
+          {"client_id", client_id},
+          {"client_secret", client_secret},
+          {"redirect_uri", redirect_uri},
+          {"grant_type", "authorization_code"},
+      };
+      auto token_json =
+          provider_json_result(google_token.Post("/token", headers, token_params),
+                               provider_label, error);
+      if (!token_json) {
+        send_html_message(req, res, provider_label + " sign-in failed", error, 502);
+        return;
+      }
+
+      const std::string access_token = token_json->value("access_token", "");
+      if (access_token.empty()) {
+        send_html_message(req, res, provider_label + " sign-in failed",
+                          "Google did not return an access token.", 502);
+        return;
+      }
+
+      httplib::Client google_profile("https://www.googleapis.com");
+      httplib::Headers profile_headers{
+          {"Accept", "application/json"},
+          {"Authorization", "Bearer " + access_token},
+      };
+      auto profile_json = provider_json_result(
+          google_profile.Get("/oauth2/v3/userinfo", profile_headers), provider_label, error);
+      if (!profile_json) {
+        send_html_message(req, res, provider_label + " sign-in failed", error, 502);
+        return;
+      }
+
+      if (profile_json->contains("email_verified") &&
+          !profile_json->value("email_verified", false)) {
+        send_html_message(req, res, provider_label + " sign-in failed",
+                          "Google did not confirm this email address.", 403);
+        return;
+      }
+      if (profile_json->value("sub", "").empty() || profile_json->value("email", "").empty()) {
+        send_html_message(req, res, provider_label + " sign-in failed",
+                          "Google did not return the profile details Quash needs.", 502);
+        return;
+      }
+
+      session = store.login_oauth_user("google", profile_json->value("sub", ""),
+                                       profile_json->value("email", ""),
+                                       profile_json->value("name", ""),
+                                       profile_json->value("picture", ""), error, status);
+    }
+
+    if (!session) {
+      send_html_message(req, res, provider_label + " sign-in failed", error, status);
+      return;
+    }
+    redirect_oauth_success(req, res, *session);
+  };
+
   server.Get("/api/auth/google", [&](const httplib::Request &req, httplib::Response &res) {
-    send_json(req, res,
-              {{"provider", "google"},
-               {"configured", false},
-               {"error",
-                "Google sign-in is added, but it needs GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET configured on Render before it can log people in."}},
-              501);
+    begin_social_auth(req, res, "google");
   });
 
+  server.Get("/api/auth/google/callback",
+             [&](const httplib::Request &req, httplib::Response &res) {
+               finish_social_auth(req, res, "google");
+             });
+
   server.Get("/api/auth/facebook", [&](const httplib::Request &req, httplib::Response &res) {
-    send_json(req, res,
-              {{"provider", "facebook"},
-               {"configured", false},
-               {"error",
-                "Facebook sign-in is added, but it needs FACEBOOK_APP_ID and FACEBOOK_APP_SECRET configured on Render before it can log people in."}},
-              501);
+    begin_social_auth(req, res, "facebook");
   });
+
+  server.Get("/api/auth/facebook/callback",
+             [&](const httplib::Request &req, httplib::Response &res) {
+               finish_social_auth(req, res, "facebook");
+             });
 
   server.Post("/api/logout", [&](const httplib::Request &req, httplib::Response &res) {
     store.logout_token(bearer_token(req));
