@@ -883,11 +883,15 @@ function showPage(route, html) {
 function mediaMarkup(post) {
   if (!post.mediaUrl) return "";
   const mediaUrl = escapeHtml(post.mediaUrl);
-  const isVideo = ["Video", "Reel"].includes(post.postType) || /\.(mp4|webm|ogg)(\?|$)/i.test(post.mediaUrl);
-  if (isVideo) {
+  if (isVideoMedia(post)) {
     return `<video class="post-media" src="${mediaUrl}" controls muted playsinline></video>`;
   }
   return `<img class="post-media" src="${mediaUrl}" alt="">`;
+}
+
+function isVideoMedia(post) {
+  if (!post.mediaUrl) return false;
+  return ["Video", "Reel"].includes(post.postType) || /\.(mp4|webm|ogg|ogv|mov)(\?|$)/i.test(post.mediaUrl);
 }
 
 function reelMediaMarkup(post) {
@@ -895,15 +899,14 @@ function reelMediaMarkup(post) {
     return `<div class="reel-text-backdrop"><span>Quash Reel</span></div>`;
   }
   const mediaUrl = escapeHtml(post.mediaUrl);
-  const isVideo = ["Video", "Reel"].includes(post.postType) || /\.(mp4|webm|ogg)(\?|$)/i.test(post.mediaUrl);
-  if (isVideo) {
-    return `<video class="reel-media" src="${mediaUrl}" controls muted loop playsinline preload="metadata"></video>`;
+  if (isVideoMedia(post)) {
+    return `<video class="reel-media" src="${mediaUrl}" muted loop playsinline autoplay preload="metadata"></video>`;
   }
   return `<img class="reel-media" src="${mediaUrl}" alt="">`;
 }
 
 function isReelPost(post) {
-  return ["Reel", "Video"].includes(post.postType) || /\.(mp4|webm|ogg)(\?|$)/i.test(post.mediaUrl || "");
+  return ["Reel", "Video"].includes(post.postType) || /\.(mp4|webm|ogg|ogv|mov)(\?|$)/i.test(post.mediaUrl || "");
 }
 
 function postShareUrl(postId) {
@@ -1022,6 +1025,12 @@ function reelActionIcon(action) {
   return icons[action] || `<svg viewBox="0 0 24 24" focusable="false"><path d="M12 5v14M5 12h14"></path></svg>`;
 }
 
+function reelAudioIcon(muted = true) {
+  return muted
+    ? `<svg viewBox="0 0 24 24" focusable="false"><path d="M11 5 6 9H3v6h3l5 4V5Z"></path><path d="m17 9 4 4m0-4-4 4"></path></svg>`
+    : `<svg viewBox="0 0 24 24" focusable="false"><path d="M11 5 6 9H3v6h3l5 4V5Z"></path><path d="M16 8a5 5 0 0 1 0 8"></path><path d="M19 5a9 9 0 0 1 0 14"></path></svg>`;
+}
+
 function reelActionButton({ action, postId, label, count, active = false }) {
   return `
     <button class="reel-action ${active ? "is-active" : ""}" type="button" data-action="${action}" data-post-id="${escapeHtml(postId)}">
@@ -1029,6 +1038,18 @@ function reelActionButton({ action, postId, label, count, active = false }) {
       <span class="reel-action-label">${escapeHtml(label)}</span>
       ${count !== undefined ? `<strong class="reel-action-count">${escapeHtml(count)}</strong>` : ""}
     </button>
+  `;
+}
+
+function reelVolumeControl(postId) {
+  return `
+    <div class="reel-volume-control is-muted" data-reel-volume-control data-post-id="${escapeHtml(postId)}">
+      <button class="reel-volume-toggle" type="button" data-action="toggle-reel-audio" aria-label="Unmute reel" aria-pressed="false">
+        ${reelAudioIcon(true)}
+      </button>
+      <input class="reel-volume-range" type="range" min="0" max="100" value="70" step="5" data-action="change-reel-volume" aria-label="Reel volume">
+      <span class="reel-volume-value">70%</span>
+    </div>
   `;
 }
 
@@ -1044,6 +1065,7 @@ function reelCard(post) {
         <div class="reel-stage">
           ${reelMediaMarkup(post)}
           <div class="reel-shadow"></div>
+          ${isVideoMedia(post) ? reelVolumeControl(post.id) : ""}
           <div class="reel-caption-panel">
             <div class="reel-author-row">
               <button class="reel-author-button" type="button" data-action="open-profile" data-user-id="${escapeHtml(post.author.id)}" aria-label="Open ${escapeHtml(post.author.fullName)} profile">
@@ -1068,6 +1090,55 @@ function reelCard(post) {
       </div>
     </article>
   `;
+}
+
+function reelVideoFromControl(control) {
+  return control?.closest(".reel-stage")?.querySelector("video.reel-media") || null;
+}
+
+function updateReelVolumeUi(control) {
+  const video = reelVideoFromControl(control);
+  const button = control?.querySelector(".reel-volume-toggle");
+  const range = control?.querySelector(".reel-volume-range");
+  const valueLabel = control?.querySelector(".reel-volume-value");
+  if (!control || !button || !range) return;
+
+  const muted = !video || video.muted || Number(video.volume || 0) === 0;
+  const percent = Math.round(Number(range.value || 0));
+  control.classList.toggle("is-muted", muted);
+  button.setAttribute("aria-pressed", muted ? "false" : "true");
+  button.setAttribute("aria-label", muted ? "Unmute reel" : "Mute reel");
+  button.innerHTML = reelAudioIcon(muted);
+  if (valueLabel) valueLabel.textContent = `${percent}%`;
+}
+
+function toggleReelAudio(button) {
+  const control = button.closest("[data-reel-volume-control]");
+  const video = reelVideoFromControl(control);
+  if (!video) return;
+
+  const range = control.querySelector(".reel-volume-range");
+  const desiredVolume = Math.max(0.05, Math.min(1, Number(range?.value || 70) / 100));
+  if (video.muted || Number(video.volume || 0) === 0) {
+    video.volume = desiredVolume;
+    video.muted = false;
+    video.play?.().catch(() => {});
+  } else {
+    video.muted = true;
+  }
+  updateReelVolumeUi(control);
+}
+
+function changeReelVolume(range) {
+  const control = range.closest("[data-reel-volume-control]");
+  const video = reelVideoFromControl(control);
+  if (!video) return;
+
+  const nextVolume = Math.max(0, Math.min(1, Number(range.value || 0) / 100));
+  video.volume = nextVolume;
+  video.muted = nextVolume === 0;
+  if (!video.muted) video.play?.().catch(() => {});
+  updateReelVolumeUi(control);
 }
 
 function setActionButtonState(button, label, countText, active = false) {
@@ -1939,6 +2010,12 @@ document.addEventListener("submit", async (event) => {
   }
 });
 
+document.addEventListener("input", (event) => {
+  const range = event.target.closest(".reel-volume-range");
+  if (!range) return;
+  changeReelVolume(range);
+});
+
 document.addEventListener("click", async (event) => {
   const routeLink = event.target.closest("[href^='#'], [data-route]");
   if (routeLink) {
@@ -1953,10 +2030,28 @@ document.addEventListener("click", async (event) => {
 
   const actionTarget = event.target.closest("[data-action]");
   const action = actionTarget?.dataset.action;
-  if (!action) return;
+  if (!action) {
+    const reelVideo = event.target.closest("video.reel-media");
+    if (reelVideo) {
+      if (reelVideo.paused) {
+        reelVideo.play?.().catch(() => {});
+      } else {
+        reelVideo.pause();
+      }
+    }
+    return;
+  }
 
   if (action === "social-login") {
     await startSocialLogin(actionTarget.dataset.provider || "google");
+    return;
+  }
+  if (action === "toggle-reel-audio") {
+    toggleReelAudio(actionTarget);
+    return;
+  }
+  if (action === "change-reel-volume") {
+    changeReelVolume(actionTarget);
     return;
   }
 
