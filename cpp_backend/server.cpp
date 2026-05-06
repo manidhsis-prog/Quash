@@ -1747,6 +1747,24 @@ int main() {
     send_json(req, res, *result);
   });
 
+  server.Get("/api/auth/google", [&](const httplib::Request &req, httplib::Response &res) {
+    send_json(req, res,
+              {{"provider", "google"},
+               {"configured", false},
+               {"error",
+                "Google sign-in is added, but it needs GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET configured on Render before it can log people in."}},
+              501);
+  });
+
+  server.Get("/api/auth/facebook", [&](const httplib::Request &req, httplib::Response &res) {
+    send_json(req, res,
+              {{"provider", "facebook"},
+               {"configured", false},
+               {"error",
+                "Facebook sign-in is added, but it needs FACEBOOK_APP_ID and FACEBOOK_APP_SECRET configured on Render before it can log people in."}},
+              501);
+  });
+
   server.Post("/api/logout", [&](const httplib::Request &req, httplib::Response &res) {
     store.logout_token(bearer_token(req));
     send_json(req, res, {{"ok", true}});

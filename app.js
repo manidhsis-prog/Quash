@@ -16,11 +16,17 @@ const composerMediaPreview = document.querySelector(".composer-media-preview");
 const tickerText = document.querySelector(".live-ticker p");
 const postButton = document.querySelector(".post-button");
 const authModal = document.querySelector(".auth-modal");
-const authTabs = document.querySelectorAll(".auth-tab");
+const authGate = document.querySelector("[data-auth-gate]");
+const authTabs = document.querySelectorAll(".auth-modal [data-auth-tab]");
 const authPanels = document.querySelectorAll("[data-auth-panel]");
-const authMessage = document.querySelector(".auth-message");
+const authMessage = document.querySelector(".auth-modal .auth-message");
+const gateAuthTabs = document.querySelectorAll("[data-gate-tab]");
+const gateAuthPanels = document.querySelectorAll("[data-gate-panel]");
+const gateAuthMessage = document.querySelector(".gate-auth-message");
 const signupForm = document.querySelector(".signup-form");
 const loginForm = document.querySelector(".login-form");
+const gateSignupForm = document.querySelector(".gate-signup-form");
+const gateLoginForm = document.querySelector(".gate-login-form");
 const authOpenButton = document.querySelector(".auth-open");
 const loginOpenButton = document.querySelector(".login-open");
 const authCloseButton = document.querySelector(".auth-close");
@@ -71,38 +77,7 @@ const tickerUpdates = [
   "Creators are forming groups around daily briefings and style drops"
 ];
 
-const demoPosts = [
-  {
-    id: "demo-news",
-    isDemo: true,
-    postType: "News",
-    body: "City climate teams are testing faster public alert routes for heat waves, floods, and transit delays. Local groups can now push verified updates. #LocalAlerts",
-    mediaUrl: "https://images.unsplash.com/photo-1495020689067-958852a7765e?auto=format&fit=crop&w=1200&q=80",
-    createdAt: Date.now() / 1000 - 480,
-    likeCount: 12400,
-    commentCount: 3,
-    shareCount: 840,
-    likedByMe: false,
-    comments: [
-      { body: "This would help local communities move faster.", createdAt: Date.now() / 1000 - 180, author: { fullName: "Dev Rao", username: "devtoday", avatarUrl: "" } }
-    ],
-    author: { id: "demo-mira", fullName: "Mira Shah", username: "miradaily", avatarUrl: "https://images.unsplash.com/photo-1508214751196-bcfd4ca60f91?auto=format&fit=crop&w=120&q=80", following: false }
-  },
-  {
-    id: "demo-reel",
-    isDemo: true,
-    postType: "Reel",
-    body: "Three streetwear details showing up everywhere today: utility pockets, silver accents, and clean oversized tailoring. #NewSeasonStyle",
-    mediaUrl: "https://images.unsplash.com/photo-1483985988355-763728e1935b?auto=format&fit=crop&w=900&q=80",
-    createdAt: Date.now() / 1000 - 1080,
-    likeCount: 8600,
-    commentCount: 5,
-    shareCount: 430,
-    likedByMe: false,
-    comments: [],
-    author: { id: "demo-arya", fullName: "Arya Lane", username: "aryastyle", avatarUrl: "https://images.unsplash.com/photo-1524504388940-b1c1722653e1?auto=format&fit=crop&w=120&q=80", following: false }
-  }
-];
+const demoPosts = [];
 
 const trends = [
   { slug: "worldin60", tag: "#WorldIn60", title: "Fast global briefings", posts: "248K posts", detail: "Short updates about policy, cities, science, business, and culture are moving quickly today." },
@@ -378,7 +353,8 @@ function requireUser() {
   const user = currentUser();
   const token = currentToken();
   if (!user || !token) {
-    openAuth("signup");
+    setGateTab("signup");
+    setAuthLocked(true);
     return null;
   }
   return user;
@@ -409,6 +385,99 @@ function setAuthTab(tabName) {
 function showAuthMessage(message, type = "info") {
   authMessage.textContent = message;
   authMessage.dataset.type = type;
+}
+
+function setAuthMessage(target, message, type = "info") {
+  if (!target) return;
+  target.textContent = message;
+  target.dataset.type = type;
+}
+
+function showGateAuthMessage(message, type = "info") {
+  setAuthMessage(gateAuthMessage, message, type);
+}
+
+function showAllAuthMessages(message, type = "info") {
+  showAuthMessage(message, type);
+  showGateAuthMessage(message, type);
+}
+
+function setGateTab(tabName) {
+  gateAuthTabs.forEach((tab) => {
+    tab.classList.toggle("active", tab.dataset.gateTab === tabName);
+  });
+  gateAuthPanels.forEach((panel) => {
+    panel.classList.toggle("hidden", panel.dataset.gatePanel !== tabName);
+  });
+  showGateAuthMessage("");
+}
+
+function setAuthLocked(locked) {
+  document.body.classList.toggle("auth-locked", Boolean(locked));
+  if (authGate) {
+    authGate.classList.toggle("hidden", !locked);
+    authGate.setAttribute("aria-hidden", locked ? "false" : "true");
+  }
+  if (locked) {
+    closeAuth();
+    closeNotifications();
+    if (shareModal?.classList.contains("open")) closeShareDialog();
+  }
+}
+
+function socialProviderName(provider) {
+  return provider === "facebook" ? "Facebook" : "Google";
+}
+
+async function enterAuthenticatedApp(route = "feed") {
+  closeAuth();
+  setAuthLocked(false);
+  history.replaceState(null, "", `#${route}`);
+  await navigate(route);
+}
+
+async function submitSignupForm(form, messageTarget) {
+  const formData = new FormData(form);
+  setAuthMessage(messageTarget, "Creating account...");
+  try {
+    const data = await requestApi("/api/register", {
+      method: "POST",
+      body: JSON.stringify(Object.fromEntries(formData))
+    });
+    saveSession(data);
+    setAuthMessage(messageTarget, "Account created. You are logged in.", "success");
+    form.reset();
+    await enterAuthenticatedApp("profile");
+  } catch (error) {
+    setAuthMessage(messageTarget, error.message, "error");
+  }
+}
+
+async function submitLoginForm(form, messageTarget) {
+  const formData = new FormData(form);
+  setAuthMessage(messageTarget, "Signing in...");
+  try {
+    const data = await requestApi("/api/login", {
+      method: "POST",
+      body: JSON.stringify(Object.fromEntries(formData))
+    });
+    saveSession(data);
+    setAuthMessage(messageTarget, "Signed in.", "success");
+    form.reset();
+    await enterAuthenticatedApp("feed");
+  } catch (error) {
+    setAuthMessage(messageTarget, error.message, "error");
+  }
+}
+
+async function startSocialLogin(provider) {
+  const providerName = socialProviderName(provider);
+  showAllAuthMessages(`Checking ${providerName} sign-in setup...`);
+  try {
+    await requestApi(`/api/auth/${encodeURIComponent(provider)}`);
+  } catch (error) {
+    showAllAuthMessages(error.message, "error");
+  }
 }
 
 function mediaKindForMode(mode) {
@@ -654,10 +723,12 @@ function saveSession(data) {
   if (!data?.user) return;
   localStorage.setItem(SESSION_USER_KEY, JSON.stringify(data.user));
   applyUser(data.user);
+  setAuthLocked(false);
   refreshNotifications();
 }
 
 function applyGuest() {
+  setAuthLocked(true);
   authOpenButton.classList.remove("profile-avatar-link");
   loginOpenButton.classList.remove("top-auth-hidden");
   authOpenButton.textContent = "Create account";
@@ -702,34 +773,6 @@ function profileHashFor(userId) {
 function publicProfileUrl(userId) {
   const baseUrl = window.location.protocol === "file:" ? `${API_BASE}/index.html` : `${window.location.origin}${window.location.pathname}`;
   return `${baseUrl}${profileHashFor(userId)}`;
-}
-
-function demoProfileFor(userId) {
-  const profilePosts = demoPosts.filter((post) => String(post.author?.id) === String(userId));
-  const author = profilePosts[0]?.author;
-  if (!author) return null;
-  const followers = String(userId) === "demo-mira" ? 12800 : 9300;
-  return {
-    user: {
-      ...author,
-      bio: `${author.fullName} shares public updates, trends, and visual stories on Quash.`,
-      followers,
-      following: Boolean(author.following)
-    },
-    posts: profilePosts,
-    activity: [
-      {
-        label: "Profile active",
-        detail: `@${author.username} is sharing updates on Quash.`,
-        createdAt: profilePosts[0]?.createdAt || Date.now() / 1000
-      }
-    ],
-    stats: {
-      posts: profilePosts.length,
-      followers,
-      following: String(userId) === "demo-mira" ? 84 : 61
-    }
-  };
 }
 
 function chatHashFor(userId) {
@@ -794,6 +837,7 @@ function chatMessageBubble(message) {
 
 function applyUser(user) {
   if (!user) return;
+  setAuthLocked(false);
   const avatarUrl = avatarUrlFor(user);
   avatarImages.forEach((image) => {
     image.src = avatarUrl;
@@ -1035,9 +1079,9 @@ function setActionButtonState(button, label, countText, active = false) {
 async function loadPosts(params = "") {
   try {
     const data = await requestApi(`/api/posts${params}`);
-    return [...data.posts, ...demoPosts].sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
+    return [...(data.posts || [])].sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
   } catch (error) {
-    return [...demoPosts].sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
+    return [];
   }
 }
 
@@ -1067,7 +1111,9 @@ async function renderFeed() {
         </div>
         <button class="page-action" type="button" data-action="compose-home">Create post</button>
       </div>
-      <div class="page-grid single">${posts.map(postCard).join("")}</div>
+      <div class="page-grid single">
+        ${posts.length ? posts.map(postCard).join("") : `<div class="empty-state compact"><p>No posts yet. Create the first real Quash update.</p></div>`}
+      </div>
     `
   );
 }
@@ -1133,7 +1179,7 @@ async function renderTopic(topicSlug) {
   try {
     data = await requestApi(`/api/topics/${encodeURIComponent(topicSlug)}`);
   } catch (error) {
-    data.posts = demoPosts.filter((post) => post.body.toLowerCase().includes(trend.tag.toLowerCase()));
+    data.posts = [];
   }
 
   showPage(
@@ -1353,23 +1399,21 @@ async function renderPublicProfile(userId) {
     return;
   }
 
-  let data = demoProfileFor(activeProfileId);
-  if (!data) {
-    try {
-      data = await requestApi(`/api/users/${encodeURIComponent(activeProfileId)}/profile`);
-    } catch (error) {
-      showPage(
-        "public-profile",
-        `
-          <div class="empty-state">
-            <h1>Profile not found</h1>
-            <p>This Quash profile is not available yet.</p>
-            <button class="page-action" type="button" data-route="feed">Back to feed</button>
-          </div>
-        `
-      );
-      return;
-    }
+  let data;
+  try {
+    data = await requestApi(`/api/users/${encodeURIComponent(activeProfileId)}/profile`);
+  } catch (error) {
+    showPage(
+      "public-profile",
+      `
+        <div class="empty-state">
+          <h1>Profile not found</h1>
+          <p>This Quash profile is not available yet.</p>
+          <button class="page-action" type="button" data-route="feed">Back to feed</button>
+        </div>
+      `
+    );
+    return;
   }
 
   const profileUser = data.user || {};
@@ -1544,7 +1588,7 @@ async function renderSearch(query) {
   try {
     data = await requestApi(`/api/search?q=${encodeURIComponent(query)}`);
   } catch (error) {
-    data.posts = demoPosts.filter((post) => post.body.toLowerCase().includes(query.toLowerCase()));
+    data.posts = [];
   }
 
   showPage(
@@ -1608,6 +1652,11 @@ async function refreshCurrentPage() {
 }
 
 async function navigate(route) {
+  if (!currentUser() || !currentToken()) {
+    setGateTab("login");
+    setAuthLocked(true);
+    return;
+  }
   activeTopic = "";
   activeProfileId = "";
   if (route === "feed") {
@@ -1813,46 +1862,28 @@ authTabs.forEach((tab) => {
   tab.addEventListener("click", () => setAuthTab(tab.dataset.authTab));
 });
 
-signupForm.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const formData = new FormData(signupForm);
-  showAuthMessage("Creating account...");
-  try {
-    const data = await requestApi("/api/register", {
-      method: "POST",
-      body: JSON.stringify(Object.fromEntries(formData))
-    });
-    saveSession(data);
-    showAuthMessage("Account created. You are logged in.", "success");
-    signupForm.reset();
-    window.setTimeout(() => {
-      closeAuth();
-      renderProfile();
-    }, 700);
-  } catch (error) {
-    showAuthMessage(error.message, "error");
-  }
+gateAuthTabs.forEach((tab) => {
+  tab.addEventListener("click", () => setGateTab(tab.dataset.gateTab));
 });
 
-loginForm.addEventListener("submit", async (event) => {
+signupForm.addEventListener("submit", (event) => {
   event.preventDefault();
-  const formData = new FormData(loginForm);
-  showAuthMessage("Signing in...");
-  try {
-    const data = await requestApi("/api/login", {
-      method: "POST",
-      body: JSON.stringify(Object.fromEntries(formData))
-    });
-    saveSession(data);
-    showAuthMessage("Signed in.", "success");
-    loginForm.reset();
-    window.setTimeout(() => {
-      closeAuth();
-      renderProfile();
-    }, 700);
-  } catch (error) {
-    showAuthMessage(error.message, "error");
-  }
+  submitSignupForm(signupForm, authMessage);
+});
+
+loginForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  submitLoginForm(loginForm, authMessage);
+});
+
+gateSignupForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  submitSignupForm(gateSignupForm, gateAuthMessage);
+});
+
+gateLoginForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  submitLoginForm(gateLoginForm, gateAuthMessage);
 });
 
 document.addEventListener("submit", async (event) => {
@@ -1927,6 +1958,11 @@ document.addEventListener("click", async (event) => {
   const actionTarget = event.target.closest("[data-action]");
   const action = actionTarget?.dataset.action;
   if (!action) return;
+
+  if (action === "social-login") {
+    await startSocialLogin(actionTarget.dataset.provider || "google");
+    return;
+  }
 
   if (action === "open-profile") {
     const userId = actionTarget.dataset.userId;
@@ -2047,10 +2083,6 @@ document.addEventListener("click", async (event) => {
   if (action === "follow-user") {
     if (!requireUser()) return;
     const userId = actionTarget.dataset.userId;
-    if (String(userId).startsWith("demo")) {
-      actionTarget.textContent = actionTarget.textContent === "Following" ? "Follow" : "Following";
-      return;
-    }
     const data = await requestApi(`/api/users/${userId}/follow`, { method: "POST", body: "{}" });
     actionTarget.textContent = data.following ? "Following" : "Follow";
     refreshNotifications();
@@ -2188,20 +2220,31 @@ async function bootstrapApp() {
   const storedUser = currentUser();
   const storedToken = currentToken();
   if (storedUser && storedToken) {
-    applyUser(storedUser);
+    setAuthLocked(true);
   } else {
     clearSession();
     applyGuest();
   }
 
   await syncSession();
+
+  if (!currentUser() || !currentToken()) {
+    setAuthLocked(true);
+    return;
+  }
+
   await migrateLocalUploadedPostsToServer();
 
   if (await renderRouteFromHash()) return;
-  setActiveRoute("feed");
+  await renderFeed();
+  history.replaceState(null, "", "#feed");
 }
 
 async function renderRouteFromHash() {
+  if (!currentUser() || !currentToken()) {
+    setAuthLocked(true);
+    return true;
+  }
   const initialRoute = window.location.hash.replace("#", "");
   if (initialRoute.startsWith("topic-")) {
     await renderTopic(initialRoute.replace("topic-", ""));
