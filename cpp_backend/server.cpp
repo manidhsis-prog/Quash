@@ -2212,6 +2212,9 @@ int main() {
   server.set_error_handler([&](const httplib::Request &req, httplib::Response &res) {
     attach_security_headers(req, res);
     if (starts_with(req.path, "/api/")) {
+      if (!res.body.empty()) {
+        return;
+      }
       if (res.status == 404) {
         send_route_not_found(req, res);
       } else {
