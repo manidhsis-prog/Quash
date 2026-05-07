@@ -552,9 +552,8 @@ bool write_binary_file(const fs::path &file_path, const std::string &content) {
 
 class QuashStore {
 public:
-  explicit QuashStore(fs::path root)
-      : root_(std::move(root)),
-        data_dir_(root_ / "data"),
+  explicit QuashStore(fs::path data_dir)
+      : data_dir_(std::move(data_dir)),
         db_file_(data_dir_ / "quash_cpp.json") {
     load_or_init();
   }
@@ -1527,7 +1526,6 @@ public:
   }
 
 private:
-  fs::path root_;
   fs::path data_dir_;
   fs::path db_file_;
   json db_;
@@ -1965,14 +1963,34 @@ int main() {
   const int port = env_int("PORT", kDefaultPort);
   const bool render_style_port = std::getenv("PORT") != nullptr;
   const std::string host = env_string("HOST", render_style_port ? "0.0.0.0" : kDefaultHost);
-  const fs::path uploads_dir = root / "uploads";
+  const std::string configured_data_dir = env_string("QUASH_DATA_DIR", "");
+  const fs::path data_dir =
+      configured_data_dir.empty() ? root / "data" : fs::path(configured_data_dir);
+  const std::string configured_uploads_dir = env_string("QUASH_UPLOADS_DIR", "");
+  const fs::path uploads_dir =
+      configured_uploads_dir.empty()
+          ? (configured_data_dir.empty() ? root / "uploads" : data_dir / "uploads")
+          : fs::path(configured_uploads_dir);
+  std::error_code data_ec;
+  fs::create_directories(data_dir, data_ec);
   std::error_code uploads_ec;
   fs::create_directories(uploads_dir, uploads_ec);
-  QuashStore store(root);
+  if (data_ec) {
+    std::cerr << "Could not create data directory " << data_dir << ": "
+              << data_ec.message() << "\n";
+  }
+  if (uploads_ec) {
+    std::cerr << "Could not create uploads directory " << uploads_dir << ": "
+              << uploads_ec.message() << "\n";
+  }
+  std::cerr << "Quash data directory: " << data_dir << "\n";
+  std::cerr << "Quash uploads directory: " << uploads_dir << "\n";
+  QuashStore store(data_dir);
 
   httplib::Server server;
   server.set_payload_max_length(kMaxUploadBytes + (2 * 1024 * 1024));
   server.set_mount_point("/", root.string());
+  server.set_mount_point("/uploads", uploads_dir.string());
 
   server.set_pre_routing_handler([&](const httplib::Request &req, httplib::Response &res) {
     if (starts_with(req.path, "/data/") || starts_with(req.path, "/cpp_backend/") ||
@@ -1989,6 +2007,15 @@ int main() {
       return httplib::Server::HandlerResponse::Handled;
     }
     return httplib::Server::HandlerResponse::Unhandled;
+  });
+
+  server.Get("/api/health", [&](const httplib::Request &req, httplib::Response &res) {
+    send_json(req, res,
+              {{"status", "ok"},
+               {"version", "persistent-data-v1"},
+               {"persistentData", !configured_data_dir.empty()},
+               {"dataDir", data_dir.string()},
+               {"uploadsDir", uploads_dir.string()}});
   });
 
   server.Get("/api/me", [&](const httplib::Request &req, httplib::Response &res) {

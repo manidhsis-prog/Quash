@@ -2,13 +2,21 @@ services:
   - type: web
     name: quash
     runtime: docker
-    plan: free
+    plan: starter
     region: singapore
     dockerfilePath: ./Dockerfile
     dockerContext: .
     healthCheckPath: /index.html
+    disk:
+      name: quash-data
+      mountPath: /var/data
+      sizeGB: 1
     envVars:
       - key: HOST
         value: 0.0.0.0
       - key: PUBLIC_BASE_URL
         value: https://quash-ugtq.onrender.com
+      - key: QUASH_DATA_DIR
+        value: /var/data
+      - key: QUASH_UPLOADS_DIR
+        value: /var/data/uploads

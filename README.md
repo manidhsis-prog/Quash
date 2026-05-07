@@ -87,8 +87,20 @@ The previous C++ prototype backend remains in `cpp_backend/` for reference, but 
 This repo also includes a root `Dockerfile` and `render.yaml` for a quick Render web-service deploy of the current working Quash prototype.
 
 - Free hosting target: Render web service on a public `*.onrender.com` subdomain.
-- Important limit: free Render Postgres databases expire after 30 days, and free services are for testing/feedback, not production.
+- Important limit: Render Free web services do not preserve local filesystem changes after deploys. Accounts, posts, messages, and uploaded media need a persistent disk or database for real use.
 - Account creation still has to be confirmed by the owner of the Gmail account in the Render signup page.
+
+### Persistent User Data
+
+The quick C++ deploy stores Quash users/posts in a JSON file and uploaded media on disk. For feedback testing on Render, attach a persistent disk before collecting real user feedback:
+
+```text
+Disk mount path: /var/data
+QUASH_DATA_DIR=/var/data
+QUASH_UPLOADS_DIR=/var/data/uploads
+```
+
+Without those values pointing to a persistent disk, every redeploy can start with empty user/post data. For production, move this storage to PostgreSQL and object storage.
 
 ### Social Login Setup
 
