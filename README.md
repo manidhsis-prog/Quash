@@ -87,6 +87,7 @@ The previous C++ prototype backend remains in `cpp_backend/` for reference, but 
 This repo also includes a root `Dockerfile` and `render.yaml` for a quick Render web-service deploy of the current working Quash prototype.
 
 - Free hosting target: Render web service on a public `*.onrender.com` subdomain.
+- Fast frontend target: GitHub Pages at `https://manidhsis-prog.github.io/Quash/`, backed by the Render API.
 - Important limit: Render Free web services do not preserve local filesystem changes after deploys. Accounts, posts, messages, and uploaded media need a persistent disk or database for real use.
 - Account creation still has to be confirmed by the owner of the Gmail account in the Render signup page.
 

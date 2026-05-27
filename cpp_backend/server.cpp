@@ -364,6 +364,8 @@ bool password_matches(const std::string &password, const std::string &stored_has
   return constant_time_equals(actual, *expected);
 }
 
+bool is_allowed_cors_origin(const std::string &origin);
+
 void attach_security_headers(const httplib::Request &req, httplib::Response &res) {
   res.set_header("X-Content-Type-Options", "nosniff");
   res.set_header("X-Frame-Options", "DENY");
@@ -377,11 +379,12 @@ void attach_security_headers(const httplib::Request &req, httplib::Response &res
 
   if (starts_with(req.path, "/api/")) {
     const auto origin = req.get_header_value("Origin");
-    if (origin == "http://127.0.0.1:8000" || origin == "http://localhost:8000") {
+    if (is_allowed_cors_origin(origin)) {
       res.set_header("Access-Control-Allow-Origin", origin);
+      res.set_header("Access-Control-Allow-Credentials", "true");
       res.set_header("Vary", "Origin");
     }
-    res.set_header("Access-Control-Allow-Headers", "Content-Type, Authorization");
+    res.set_header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-XSRF-TOKEN");
     res.set_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
   }
 }
@@ -451,6 +454,44 @@ std::string strip_trailing_slashes(std::string value) {
   return value;
 }
 
+std::string origin_from_url(std::string url) {
+  url = strip_trailing_slashes(trim_copy(url));
+  const auto scheme = url.find("://");
+  if (scheme == std::string::npos) return url;
+  const auto path = url.find('/', scheme + 3);
+  return path == std::string::npos ? url : url.substr(0, path);
+}
+
+std::vector<std::string> csv_values(const std::string &csv) {
+  std::vector<std::string> values;
+  size_t start = 0;
+  while (start <= csv.size()) {
+    const auto comma = csv.find(',', start);
+    const std::string value =
+        trim_copy(csv.substr(start, comma == std::string::npos ? std::string::npos : comma - start));
+    if (!value.empty()) values.push_back(value);
+    if (comma == std::string::npos) break;
+    start = comma + 1;
+  }
+  return values;
+}
+
+bool is_allowed_cors_origin(const std::string &origin) {
+  if (origin.empty()) return false;
+  std::vector<std::string> allowed{
+      "http://127.0.0.1:8000",
+      "http://localhost:8000",
+      "https://manidhsis-prog.github.io",
+  };
+
+  const std::string app_url = env_string("PUBLIC_APP_URL", "");
+  if (!app_url.empty()) allowed.push_back(origin_from_url(app_url));
+  for (const auto &extra : csv_values(env_string("CORS_ORIGINS", ""))) {
+    allowed.push_back(origin_from_url(extra));
+  }
+  return std::find(allowed.begin(), allowed.end(), strip_trailing_slashes(origin)) != allowed.end();
+}
+
 std::string app_base_url(const httplib::Request &req) {
   std::string proto = trim_copy(req.get_header_value("X-Forwarded-Proto"));
   if (proto.empty()) proto = "http";
@@ -464,6 +505,17 @@ std::string app_base_url(const httplib::Request &req) {
   const std::string configured = env_string("PUBLIC_BASE_URL", "");
   if (!configured.empty()) return strip_trailing_slashes(configured);
   return "http://127.0.0.1:8000";
+}
+
+std::string frontend_base_url(const httplib::Request &req) {
+  const std::string configured = env_string("PUBLIC_APP_URL", "");
+  if (!configured.empty()) return strip_trailing_slashes(configured);
+  const std::string forwarded_host = trim_copy(req.get_header_value("X-Forwarded-Host"));
+  const std::string host = forwarded_host.empty() ? trim_copy(req.get_header_value("Host")) : forwarded_host;
+  if (host.find(".onrender.com") != std::string::npos) {
+    return "https://manidhsis-prog.github.io/Quash";
+  }
+  return app_base_url(req);
 }
 
 std::string oauth_redirect_uri(const httplib::Request &req, const std::string &provider) {
@@ -487,7 +539,8 @@ void send_html_message(const httplib::Request &req, httplib::Response &res,
       "a{display:inline-block;background:#008c95;color:white;text-decoration:none;padding:12px 18px;"
       "border-radius:8px;font-weight:700}</style></head><body><main class=\"wrap\"><section class=\"box\">"
       "<h1>" + html_escape(title) + "</h1><p>" + html_escape(message) + "</p>"
-      "<a href=\"/index.html\">Back to Quash</a></section></main></body></html>";
+      "<a href=\"" + html_escape(frontend_base_url(req)) +
+      "/index.html\">Back to Quash</a></section></main></body></html>";
   res.set_content(body, "text/html; charset=utf-8");
 }
 
@@ -527,7 +580,7 @@ std::optional<json> provider_json_result(const httplib::Result &result,
 void redirect_oauth_success(const httplib::Request &req, httplib::Response &res,
                             const json &session) {
   const std::string payload = base64url_encode_string(session.dump());
-  redirect_to(req, res, app_base_url(req) + "/index.html#oauth-" + payload);
+  redirect_to(req, res, frontend_base_url(req) + "/index.html#oauth-" + payload);
 }
 
 std::optional<std::string> upload_extension_for_content_type(const std::string &content_type) {

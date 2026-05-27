@@ -50,7 +50,14 @@ const shareInput = document.querySelector(".share-link-input");
 const shareSummary = document.querySelector(".share-summary");
 const shareMessage = document.querySelector(".share-message");
 const sharePlatformLinks = document.querySelectorAll(".share-platforms a");
-const API_BASE = window.location.protocol === "file:" ? LOCAL_SERVER_ORIGIN : "";
+const RENDER_API_ORIGIN = "https://quash-ugtq.onrender.com";
+const STATIC_FRONTEND_HOSTS = new Set(["manidhsis-prog.github.io"]);
+const IS_STATIC_FRONTEND = STATIC_FRONTEND_HOSTS.has(window.location.hostname);
+const API_BASE = window.location.protocol === "file:"
+  ? LOCAL_SERVER_ORIGIN
+  : IS_STATIC_FRONTEND
+    ? RENDER_API_ORIGIN
+    : "";
 const SESSION_USER_KEY = "quashUser";
 const SESSION_TOKEN_KEY = "quashToken";
 const LOCAL_UPLOADED_POSTS_KEY = "quashLocalUploadedPosts";
@@ -67,6 +74,16 @@ const SAVED_REELS_KEY = "quashSavedReels";
 let shareContext = null;
 let uploadedComposerMedia = null;
 let activeChatUserId = "";
+
+function apiUrl(path) {
+  return `${API_BASE}${path}`;
+}
+
+function mediaUrlFor(value) {
+  const url = String(value || "");
+  if (url.startsWith("/") && API_BASE) return `${API_BASE}${url}`;
+  return url;
+}
 
 const tickerUpdates = [
   "Fashion Week street looks are rising across global style circles",
@@ -353,13 +370,13 @@ async function requestApi(path, options = {}) {
 
   let response;
   try {
-    response = await fetch(`${API_BASE}${path}`, {
+    response = await fetch(apiUrl(path), {
       ...options,
       credentials: "include",
       headers
     });
   } catch (error) {
-    throw new Error("Cannot reach Quash server. Open http://127.0.0.1:8000/index.html");
+    throw new Error("Cannot reach Quash server. Please try again in a moment.");
   }
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
@@ -480,7 +497,7 @@ function startSocialLogin(provider) {
   const safeProvider = provider === "facebook" ? "facebook" : "google";
   const providerName = socialProviderName(provider);
   showAllAuthMessages(`Opening ${providerName} sign-in...`);
-  window.location.assign(`${API_BASE}/api/auth/${encodeURIComponent(safeProvider)}`);
+  window.location.assign(apiUrl(`/api/auth/${encodeURIComponent(safeProvider)}`));
 }
 
 function mediaKindForMode(mode) {
@@ -639,7 +656,7 @@ async function uploadComposerMedia(file, onProgress = () => {}) {
 
   return new Promise((resolve, reject) => {
     const request = new XMLHttpRequest();
-    request.open("POST", `${API_BASE}/api/media-upload`);
+    request.open("POST", apiUrl("/api/media-upload"));
     request.withCredentials = true;
 
     const token = currentToken();
@@ -688,7 +705,7 @@ async function migrateLocalUploadedPostsToServer() {
         continue;
       }
 
-      const mediaResponse = await fetch(post.mediaUrl);
+      const mediaResponse = await fetch(mediaUrlFor(post.mediaUrl));
       const mediaBlob = await mediaResponse.blob();
       const uploaded = await uploadComposerMedia(mediaBlob);
       await requestApi("/api/posts", {
@@ -882,7 +899,7 @@ function showPage(route, html) {
 
 function mediaMarkup(post) {
   if (!post.mediaUrl) return "";
-  const mediaUrl = escapeHtml(post.mediaUrl);
+  const mediaUrl = escapeHtml(mediaUrlFor(post.mediaUrl));
   if (isVideoMedia(post)) {
     return `<video class="post-media" src="${mediaUrl}" controls muted playsinline></video>`;
   }
@@ -898,7 +915,7 @@ function reelMediaMarkup(post) {
   if (!post.mediaUrl) {
     return `<div class="reel-text-backdrop"><span>Quash Reel</span></div>`;
   }
-  const mediaUrl = escapeHtml(post.mediaUrl);
+  const mediaUrl = escapeHtml(mediaUrlFor(post.mediaUrl));
   if (isVideoMedia(post)) {
     return `<video class="reel-media" src="${mediaUrl}" muted loop playsinline autoplay preload="metadata"></video>`;
   }

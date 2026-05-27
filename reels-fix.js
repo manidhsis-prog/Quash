@@ -32,7 +32,7 @@
     if (!post.mediaUrl) {
       return `<div class="reel-text-backdrop"><span>Quash Reel</span></div>`;
     }
-    const mediaUrl = escapeHtml(post.mediaUrl);
+    const mediaUrl = escapeHtml(mediaUrlFor(post.mediaUrl));
     if (isVideoMedia(post)) {
       return `<video class="reel-media" src="${mediaUrl}" muted loop playsinline autoplay preload="metadata"></video>`;
     }
