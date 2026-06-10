@@ -52,12 +52,13 @@ const shareInput = document.querySelector(".share-link-input");
 const shareSummary = document.querySelector(".share-summary");
 const shareMessage = document.querySelector(".share-message");
 const sharePlatformLinks = document.querySelectorAll(".share-platforms a");
-const RENDER_API_ORIGIN = "https://quash-ugtq.onrender.com";
+const RENDER_API_ORIGIN = "https://quash.onrender.com";
+const CANONICAL_RENDER_HOST = "quash.onrender.com";
 const STATIC_FRONTEND_HOSTS = new Set(["manidhsis-prog.github.io"]);
 const IS_STATIC_FRONTEND = STATIC_FRONTEND_HOSTS.has(window.location.hostname);
 const API_BASE = window.location.protocol === "file:"
   ? LOCAL_SERVER_ORIGIN
-  : IS_STATIC_FRONTEND
+  : IS_STATIC_FRONTEND || (window.location.hostname.endsWith(".onrender.com") && window.location.hostname !== CANONICAL_RENDER_HOST)
     ? RENDER_API_ORIGIN
     : "";
 const SESSION_USER_KEY = "quashUser";

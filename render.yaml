@@ -15,11 +15,11 @@ services:
       - key: HOST
         value: 0.0.0.0
       - key: PUBLIC_BASE_URL
-        value: https://quash-ugtq.onrender.com
+        value: https://quash.onrender.com
       - key: PUBLIC_APP_URL
         value: https://manidhsis-prog.github.io/Quash
       - key: CORS_ORIGINS
-        value: https://manidhsis-prog.github.io
+        value: https://manidhsis-prog.github.io,https://quash-ugtq.onrender.com
       - key: QUASH_DATA_DIR
         value: /var/data
       - key: QUASH_UPLOADS_DIR

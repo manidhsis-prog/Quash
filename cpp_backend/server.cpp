@@ -482,6 +482,7 @@ bool is_allowed_cors_origin(const std::string &origin) {
       "http://127.0.0.1:8000",
       "http://localhost:8000",
       "https://manidhsis-prog.github.io",
+      "https://quash-ugtq.onrender.com",
   };
 
   const std::string app_url = env_string("PUBLIC_APP_URL", "");
