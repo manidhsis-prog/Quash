@@ -25,6 +25,8 @@ const gateAuthPanels = document.querySelectorAll("[data-gate-panel]");
 const gateAuthMessage = document.querySelector(".gate-auth-message");
 const loginForm = document.querySelector(".login-form");
 const gateLoginForm = document.querySelector(".gate-login-form");
+const registerForm = document.querySelector(".register-form");
+const gateRegisterForm = document.querySelector(".gate-register-form");
 const authOpenButton = document.querySelector(".auth-open");
 const loginOpenButton = document.querySelector(".login-open");
 const authCloseButton = document.querySelector(".auth-close");
@@ -487,6 +489,23 @@ async function submitLoginForm(form, messageTarget) {
     });
     saveSession(data);
     setAuthMessage(messageTarget, "Signed in.", "success");
+    form.reset();
+    await enterAuthenticatedApp("feed");
+  } catch (error) {
+    setAuthMessage(messageTarget, error.message, "error");
+  }
+}
+
+async function submitRegisterForm(form, messageTarget) {
+  const formData = new FormData(form);
+  setAuthMessage(messageTarget, "Creating account...");
+  try {
+    const data = await requestApi("/api/register", {
+      method: "POST",
+      body: JSON.stringify(Object.fromEntries(formData))
+    });
+    saveSession(data);
+    setAuthMessage(messageTarget, "Account created. You are signed in.", "success");
     form.reset();
     await enterAuthenticatedApp("feed");
   } catch (error) {
@@ -1964,6 +1983,16 @@ loginForm.addEventListener("submit", (event) => {
 gateLoginForm.addEventListener("submit", (event) => {
   event.preventDefault();
   submitLoginForm(gateLoginForm, gateAuthMessage);
+});
+
+registerForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  submitRegisterForm(registerForm, authMessage);
+});
+
+gateRegisterForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  submitRegisterForm(gateRegisterForm, gateAuthMessage);
 });
 
 document.addEventListener("submit", async (event) => {

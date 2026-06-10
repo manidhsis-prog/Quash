@@ -29,6 +29,10 @@
             Continue with Facebook
           </button>
         </div>
+        <div class="auth-tabs" role="tablist" aria-label="Account options">
+          <button class="auth-tab active" type="button" data-gate-tab="login">Sign in</button>
+          <button class="auth-tab" type="button" data-gate-tab="register">Create account</button>
+        </div>
         <form class="auth-form gate-login-form" data-gate-panel="login">
           <h1 id="auth-gate-title">Sign in to Quash</h1>
           <p>Use email, username, or phone number with your password.</p>
@@ -41,6 +45,23 @@
             <input name="password" type="password" autocomplete="current-password" required>
           </label>
           <button class="auth-submit" type="submit">Sign in</button>
+        </form>
+        <form class="auth-form gate-register-form hidden" data-gate-panel="register">
+          <h1>Create your account</h1>
+          <p>Create directly with email and password. No email verification code is required.</p>
+          <label>
+            Full name
+            <input name="fullName" autocomplete="name" maxlength="80" placeholder="Your name">
+          </label>
+          <label>
+            Email
+            <input name="email" type="email" autocomplete="email" required maxlength="160">
+          </label>
+          <label>
+            Password
+            <input name="password" type="password" autocomplete="new-password" required minlength="6">
+          </label>
+          <button class="auth-submit" type="submit">Create account</button>
         </form>
         <p class="auth-message gate-auth-message" role="status"></p>
       </div>
@@ -330,6 +351,10 @@
             Continue with Facebook
           </button>
         </div>
+        <div class="auth-tabs" role="tablist" aria-label="Account options">
+          <button class="auth-tab active" type="button" data-auth-tab="login">Sign in</button>
+          <button class="auth-tab" type="button" data-auth-tab="register">Create account</button>
+        </div>
         <form class="auth-form login-form" data-auth-panel="login">
           <h2 id="auth-title">Sign in to Quash</h2>
           <p>Use email, username, or phone number with your password.</p>
@@ -343,11 +368,28 @@
           </label>
           <button class="auth-submit" type="submit">Sign in</button>
         </form>
+        <form class="auth-form register-form hidden" data-auth-panel="register">
+          <h2>Create your account</h2>
+          <p>Create directly with email and password. No email verification code is required.</p>
+          <label>
+            Full name
+            <input name="fullName" autocomplete="name" maxlength="80" placeholder="Your name">
+          </label>
+          <label>
+            Email
+            <input name="email" type="email" autocomplete="email" required maxlength="160">
+          </label>
+          <label>
+            Password
+            <input name="password" type="password" autocomplete="new-password" required minlength="6">
+          </label>
+          <button class="auth-submit" type="submit">Create account</button>
+        </form>
         <p class="auth-message" role="status"></p>
       </div>
     </div>
 
-    <script src="app.js?v=34"></script>
+    <script src="app.js?v=35"></script>
     <script src="reels-fix.js?v=26"></script>
   </body>
 </html>

@@ -658,11 +658,18 @@ public:
     std::lock_guard<std::mutex> lock(mutex_);
     cleanup_expired_sessions_unlocked(unix_now());
 
-    const auto email_lower = lower_copy(email);
+    const auto email_lower = lower_copy(trim_copy(email));
+    const std::string final_full_name =
+        trim_copy(full_name).empty() ? oauth_display_name(email_lower, "email") : trim_copy(full_name);
+    const std::string final_phone = normalize_phone_number(phone);
+    std::string final_username = trim_copy(username);
+    if (final_username.empty()) {
+      final_username = unique_username_unlocked(oauth_username_seed(email_lower, final_full_name, "email"));
+    }
     for (const auto &user : db_["users"]) {
-      if (user.value("username", "") == username ||
+      if (lower_copy(user.value("username", "")) == lower_copy(final_username) ||
           lower_copy(user.value("email", "")) == email_lower ||
-          (!phone.empty() && user.value("phone", "") == phone)) {
+          (!final_phone.empty() && user.value("phone", "") == final_phone)) {
         error = "That username, email, or phone number is already registered.";
         status = 409;
         return std::nullopt;
@@ -673,13 +680,16 @@ public:
     const int user_id = next_id_unlocked("user");
     json user{
         {"id", user_id},
-        {"fullName", full_name},
-        {"username", username},
+        {"fullName", final_full_name},
+        {"username", final_username},
         {"email", email_lower},
-        {"phone", phone},
+        {"phone", final_phone},
         {"passwordHash", *hash},
         {"bio", bio},
         {"avatarUrl", ""},
+        {"googleId", ""},
+        {"facebookId", ""},
+        {"authProvider", "password"},
         {"createdAt", now},
     };
     db_["users"].push_back(user);
@@ -2104,10 +2114,57 @@ int main() {
   });
 
   server.Post("/api/register", [&](const httplib::Request &req, httplib::Response &res) {
-    send_json(req, res,
-              {{"error",
-                "Direct account creation is disabled. Sign in with an approved Quash account."}},
-              403);
+    if (!store.allow_rate("register", client_fingerprint(req))) {
+      send_json(req, res, {{"error", "Too many account attempts. Please wait and try again."}},
+                429);
+      return;
+    }
+
+    std::string parse_error;
+    int parse_status = 400;
+    auto body = parse_json_body(req, parse_error, parse_status);
+    if (!body) {
+      send_json(req, res, {{"error", parse_error}}, parse_status);
+      return;
+    }
+
+    std::string full_name = trim_copy(body->value("fullName", ""));
+    std::string username = trim_copy(body->value("username", ""));
+    const std::string email = lower_copy(trim_copy(body->value("email", "")));
+    const std::string phone = normalize_phone_number(body->value("phone", ""));
+    const std::string password = body->value("password", "");
+    std::string bio = trim_copy(body->value("bio", ""));
+
+    if (email.empty() || password.empty()) {
+      send_json(req, res, {{"error", "Email and password are required."}}, 400);
+      return;
+    }
+    if (!std::regex_match(email, kEmailRe)) {
+      send_json(req, res, {{"error", "Enter a valid email address."}}, 400);
+      return;
+    }
+    if (password.size() < 6) {
+      send_json(req, res, {{"error", "Password must be at least 6 characters."}}, 400);
+      return;
+    }
+    if (!username.empty() && !std::regex_match(username, kUsernameRe)) {
+      send_json(req, res,
+                {{"error", "Username can use letters, numbers, and underscores only."}}, 400);
+      return;
+    }
+
+    if (full_name.size() > 80) full_name = full_name.substr(0, 80);
+    if (bio.empty()) bio = "Connecting with the world on Quash.";
+    if (bio.size() > 240) bio = bio.substr(0, 240);
+
+    std::string error;
+    int status = 201;
+    auto result = store.register_user(full_name, username, email, phone, password, bio, error, status);
+    if (!result) {
+      send_json(req, res, {{"error", error}}, status);
+      return;
+    }
+    send_json(req, res, *result, 201);
   });
 
   server.Post("/api/login", [&](const httplib::Request &req, httplib::Response &res) {
