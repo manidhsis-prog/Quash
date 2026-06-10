@@ -393,8 +393,9 @@ function requireUser() {
   const user = currentUser();
   const token = currentToken();
   if (!user || !token) {
-    setGateTab("login");
-    setAuthLocked(true);
+    setAuthLocked(false);
+    openAuth("login");
+    showAuthMessage("Sign in to use this feature.", "info");
     return null;
   }
   return user;
@@ -748,7 +749,7 @@ function saveSession(data) {
 }
 
 function applyGuest() {
-  setAuthLocked(true);
+  setAuthLocked(false);
   authOpenButton.classList.remove("profile-avatar-link");
   authOpenButton.classList.add("top-auth-hidden");
   loginOpenButton.classList.remove("top-auth-hidden");
@@ -1746,11 +1747,6 @@ async function refreshCurrentPage() {
 }
 
 async function navigate(route) {
-  if (!currentUser() || !currentToken()) {
-    setGateTab("login");
-    setAuthLocked(true);
-    return;
-  }
   activeTopic = "";
   activeProfileId = "";
   if (route === "feed") {
@@ -2329,7 +2325,7 @@ async function bootstrapApp() {
   const storedUser = currentUser();
   const storedToken = currentToken();
   if (storedUser && storedToken) {
-    setAuthLocked(true);
+    setAuthLocked(false);
   } else {
     clearSession();
     applyGuest();
@@ -2337,12 +2333,9 @@ async function bootstrapApp() {
 
   await syncSession();
 
-  if (!currentUser() || !currentToken()) {
-    setAuthLocked(true);
-    return;
+  if (currentUser() && currentToken()) {
+    await migrateLocalUploadedPostsToServer();
   }
-
-  await migrateLocalUploadedPostsToServer();
 
   if (await renderRouteFromHash()) return;
   await renderFeed();
@@ -2350,10 +2343,6 @@ async function bootstrapApp() {
 }
 
 async function renderRouteFromHash() {
-  if (!currentUser() || !currentToken()) {
-    setAuthLocked(true);
-    return true;
-  }
   const initialRoute = window.location.hash.replace("#", "");
   if (initialRoute.startsWith("topic-")) {
     await renderTopic(initialRoute.replace("topic-", ""));
